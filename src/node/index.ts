@@ -1,4 +1,6 @@
 import WebSocket from 'ws';
+import * as dotenv from 'dotenv';
+dotenv.config();
 import * as os from 'node:os';
 import { ToolRegistry } from '../tools/registry.js';
 import { ToolExecutor } from '../tools/executor.js';
