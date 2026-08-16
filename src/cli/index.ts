@@ -4,6 +4,7 @@ import * as dotenv from 'dotenv';
 import { AthenaCore } from '../core/athena.js';
 import { LLMRouter } from '../llm/router.js';
 import { GeminiProvider } from '../llm/providers/gemini.js';
+import { handleCommand } from './commands.js';
 
 dotenv.config();
 
@@ -30,34 +31,49 @@ async function main(): Promise<void> {
     const athena = new AthenaCore(router);
 
     console.log('[System] ATHENA is online.');
-    console.log("[System] Type 'exit' to shut down.\n");
+    console.log("[System] Type '/help' for available commands.\n");
 
     const askQuestion = (): void => {
         rl.question('You: ', async (input: string) => {
-            const command = input.trim().toLowerCase();
-
-            if (command === 'exit') {
-                console.log('\nATHENA: Shutting down. Goodbye, sir.');
-                rl.close();
-                return;
-            }
-
-            if (command === 'clear') {
-                athena.clearConversation();
-
-                console.log(
-                    '\nATHENA: Conversation context cleared, sir.\n'
-                );
-
-                askQuestion();
-                return;
-            }
-
+            // Ignore empty input.
             if (!input.trim()) {
                 askQuestion();
                 return;
             }
 
+            // Handle local CLI commands BEFORE contacting the LLM.
+            const result = handleCommand(input, {
+                getHistoryLength: () => athena.getHistoryLength(),
+            });
+
+            if (result.handled) {
+                switch (result.action) {
+                    case 'clear':
+                        athena.clearHistory();
+
+                        console.log(
+                            '\nATHENA: Conversation context cleared, sir.\n'
+                        );
+
+                        askQuestion();
+                        return;
+
+                    case 'exit':
+                        console.log(
+                            '\nATHENA: Shutting down. Goodbye, sir.\n'
+                        );
+
+                        rl.close();
+                        return;
+
+                    default:
+                        // Command was handled but requires no additional action.
+                        askQuestion();
+                        return;
+                }
+            }
+
+            // Normal messages reach ATHENA and therefore the LLM.
             process.stdout.write('ATHENA: thinking...');
 
             try {

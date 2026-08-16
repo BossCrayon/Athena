@@ -50,7 +50,16 @@ export class AthenaCore {
         return this.history;
     }
 
-    clearConversation(): void {
-        this.history.length = 1;
+    clearHistory(): void {
+        this.history.length = 0;
+
+        this.history.push({
+            role: 'system',
+            content: ATHENA_SYSTEM_PROMPT,
+        });
+    }
+
+    getHistoryLength(): number {
+        return this.history.length;
     }
 }
