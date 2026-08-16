@@ -16,7 +16,7 @@ export const systemControlTool: Tool = {
             parameters: [
                 {
                     name: 'action',
-                    description: 'The action to perform: "list_apps", "list_processes", "kill_process", "open_app", "system_info", "advanced_hardware_info".',
+                    description: 'The action to perform: "list_apps", "list_processes", "kill_process", "open_app", "system_info", "advanced_hardware_info", "network_status".',
                     type: 'string',
                     required: true,
                 },
@@ -88,6 +88,15 @@ export const systemControlTool: Tool = {
                 const cmd = 'powershell -Command "Start-Process \'' + target + '\'"';
                 await execAsync(cmd);
                 return { success: true, output: 'Successfully sent command to open: ' + target };
+            }
+            
+            else if (action === 'network_status') {
+                // Gets active TCP/UDP connections and listening ports with PIDs
+                const cmd = 'netstat -ano';
+                const { stdout } = await execAsync(cmd);
+                let output = stdout;
+                if (output.length > 15000) output = output.substring(0, 15000) + '\\n...[TRUNCATED]...';
+                return { success: true, output };
             }
             
             else {
