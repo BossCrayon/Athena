@@ -8,11 +8,11 @@ const execAsync = promisify(exec);
 export const systemControlTool: Tool = {
     definition: {
         name: 'system_control',
-        description: 'Interacts with the local device to list running applications, kill processes, open apps, or get detailed system hardware information.',
+        description: 'Interacts with the local device to list running applications, kill processes, open apps, lock the screen/workstation, or get detailed system hardware information.',
         permission: 'safe',
         schema: {
             name: 'system_control',
-            description: 'Interacts with the local device to list running applications, kill processes, open apps, or get detailed system hardware information.',
+            description: 'Interacts with the local device to list running applications, kill processes, open apps, lock the screen/workstation, or get detailed system hardware information.',
             parameters: [
                 {
                     name: 'action',
