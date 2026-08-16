@@ -16,7 +16,7 @@ export const systemControlTool: Tool = {
             parameters: [
                 {
                     name: 'action',
-                    description: 'The action to perform: "list_apps", "list_processes", "kill_process", "open_app", "system_info", "advanced_hardware_info", "network_status", "ip_lookup", "process_path", "deep_security_scan".',
+                    description: 'The action to perform: "list_apps", "list_processes", "kill_process", "open_app", "system_info", "advanced_hardware_info", "network_status", "ip_lookup", "process_path", "deep_security_scan", "lock_system".',
                     type: 'string',
                     required: true,
                 },
@@ -88,6 +88,12 @@ export const systemControlTool: Tool = {
                 const cmd = 'powershell -Command "Start-Process \'' + target + '\'"';
                 await execAsync(cmd);
                 return { success: true, output: 'Successfully sent command to open: ' + target };
+            }
+            
+            else if (action === 'lock_system') {
+                const cmd = 'rundll32.exe user32.dll,LockWorkStation';
+                await execAsync(cmd);
+                return { success: true, output: 'Successfully locked the workstation.' };
             }
             
             else if (action === 'network_status') {
