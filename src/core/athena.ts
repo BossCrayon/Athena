@@ -42,17 +42,15 @@ export class AthenaCore {
 
     async initialize() {
         const savedHistory = await this.memoryManager.loadHistory();
-        if (savedHistory.length > 0) {
-            this.history = savedHistory;
-        } else {
-            this.history = [
-                {
-                    role: 'system',
-                    content: ATHENA_SYSTEM_PROMPT,
-                },
-            ];
-            await this.memoryManager.syncMessage(this.history[0]);
-        }
+        
+        // Filter out any old system prompts to avoid duplicates
+        this.history = savedHistory.filter(m => m.role !== 'system');
+        
+        // ALWAYS prepend the latest system prompt to the beginning of her working memory
+        this.history.unshift({
+            role: 'system',
+            content: ATHENA_SYSTEM_PROMPT,
+        });
     }
 
     async chat(userInput: string, onToken?: (text: string) => void, onToolCall?: (toolName: string) => void): Promise<string> {
