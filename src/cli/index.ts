@@ -5,11 +5,15 @@ const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
 });
+import * as dotenv from 'dotenv';
+dotenv.config();
+
+const SERVER_URL = process.env.ATHENA_CLIENT_URL || 'ws://localhost:3000/chat';
 
 async function main() {
-    console.log('[System] Connecting to ATHENA Server (ws://localhost:3000/chat)...');
+    console.log(`[System] Connecting to ATHENA Server (${SERVER_URL})...`);
 
-    const ws = new WebSocket('ws://localhost:3000/chat');
+    const ws = new WebSocket(SERVER_URL);
     
     let isWaitingForResponse = false;
     let isFirstToken = false;
