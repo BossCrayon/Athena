@@ -92,7 +92,7 @@ export class OpenRouterProvider implements LLMProvider {
             model: this.model,
             messages: formattedMessages,
             temperature: options?.temperature,
-            max_tokens: options?.maxOutputTokens ?? 1024,
+            max_tokens: options?.maxOutputTokens ?? 512,
             tools: this.convertTools(tools),
             stream: true
         });
@@ -185,7 +185,7 @@ export class OpenRouterProvider implements LLMProvider {
             model: this.model,
             messages: history,
             temperature: options?.temperature,
-            max_tokens: options?.maxOutputTokens ?? 1024,
+            max_tokens: options?.maxOutputTokens ?? 512,
             tools: this.convertTools(tools),
             stream: true
         });
