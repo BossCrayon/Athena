@@ -55,7 +55,7 @@ export class AthenaCore {
         }
     }
 
-    async chat(userInput: string, onToken?: (text: string) => void): Promise<string> {
+    async chat(userInput: string, onToken?: (text: string) => void, onToolCall?: (toolName: string) => void): Promise<string> {
         const userMsg: Message = {
             role: 'user',
             content: userInput,
@@ -87,7 +87,8 @@ export class AthenaCore {
                 return await this.handleToolCalls(
                     response.toolCalls,
                     response.continuationId,
-                    onToken
+                    onToken,
+                    onToolCall
                 );
             } else {
                 const modelMsg: Message = {
@@ -114,11 +115,15 @@ export class AthenaCore {
     private async handleToolCalls(
         toolCalls: ToolCall[],
         continuationId: string,
-        onToken?: (text: string) => void
+        onToken?: (text: string) => void,
+        onToolCall?: (toolName: string) => void
     ): Promise<string> {
         const results: ToolResult[] = [];
 
         for (const toolCall of toolCalls) {
+            if (onToolCall) {
+                onToolCall(toolCall.name);
+            }
             const result =
                 await this.toolOrchestrator.handle(
                     {
@@ -171,7 +176,8 @@ export class AthenaCore {
             return await this.handleToolCalls(
                 response.toolCalls,
                 response.continuationId,
-                onToken
+                onToken,
+                onToolCall
             );
         }
         let finalResponseText = response.text;
