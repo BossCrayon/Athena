@@ -30,7 +30,8 @@ export class CloudMemoryManager {
                 .from('messages')
                 .select('*')
                 .eq('session_id', this.sessionId)
-                .order('created_at', { ascending: true });
+                .order('created_at', { ascending: false })
+                .limit(20);
 
             if (error) {
                 console.error('[Memory] Error loading history from Supabase:', error.message);
@@ -40,6 +41,9 @@ export class CloudMemoryManager {
             if (!data || data.length === 0) {
                 return [];
             }
+
+            // Reverse the data so it's chronologically ascending for the LLM
+            data.reverse();
 
             // Convert Supabase rows back to Message objects
             return data.map((row) => {
