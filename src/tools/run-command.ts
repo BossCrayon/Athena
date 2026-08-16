@@ -31,9 +31,13 @@ export const runCommandTool: Tool = {
             if (stdout.length > 15000) stdout = stdout.substring(0, 15000) + '\\n...[STDOUT TRUNCATED]...';
             if (stderr.length > 5000) stderr = stderr.substring(0, 5000) + '\\n...[STDERR TRUNCATED]...';
 
+            if (!stdout.trim() && !stderr.trim()) {
+                return { success: true, output: "Command executed successfully with no output." };
+            }
+
             return {
                 success: true,
-                output: "STDOUT:\\n" + stdout + "\\n\\nSTDERR:\\n" + stderr,
+                output: "STDOUT:\\n" + (stdout || "None") + "\\n\\nSTDERR:\\n" + (stderr || "None"),
             };
         } catch (err: any) {
             return { 

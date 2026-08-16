@@ -44,12 +44,12 @@ export class GeminiProvider implements LLMProvider {
     }
 
     private async _getInteractionWithRetry(interactionId: string) {
-        for (let i = 0; i < 4; i++) {
+        for (let i = 0; i < 10; i++) {
             try {
                 return await this.ai.interactions.get(interactionId);
             } catch (error: any) {
-                if (error.status === 404 || error.statusCode === 404) {
-                    await new Promise((resolve) => setTimeout(resolve, 500 * (i + 1)));
+                if (error.status === 404 || error.statusCode === 404 || error.status === 400 || error.statusCode === 400) {
+                    await new Promise((resolve) => setTimeout(resolve, 50));
                     continue;
                 }
                 throw error;

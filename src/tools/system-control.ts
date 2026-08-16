@@ -16,13 +16,13 @@ export const systemControlTool: Tool = {
             parameters: [
                 {
                     name: 'action',
-                    description: 'The action to perform: "list_apps", "list_processes", "kill_process", "open_app", "system_info", "advanced_hardware_info", "network_status".',
+                    description: 'The action to perform: "list_apps", "list_processes", "kill_process", "open_app", "system_info", "advanced_hardware_info", "network_status", "ip_lookup", "process_path", "deep_security_scan".',
                     type: 'string',
                     required: true,
                 },
                 {
                     name: 'target',
-                    description: 'The name of the process to kill or the app to open (e.g. "notepad.exe", "calc"). Required for "kill_process" and "open_app".',
+                    description: 'The target process name, PID, app name, or IP address (e.g. "notepad.exe", "1234", "8.8.8.8").',
                     type: 'string',
                     required: false,
                 }
@@ -97,6 +97,28 @@ export const systemControlTool: Tool = {
                 let output = stdout;
                 if (output.length > 15000) output = output.substring(0, 15000) + '\\n...[TRUNCATED]...';
                 return { success: true, output };
+            }
+            
+            else if (action === 'ip_lookup') {
+                if (!target) return { success: false, output: 'Must provide target IP address.' };
+                const res = await fetch('http://ip-api.com/json/' + target);
+                const data = await res.json();
+                return { success: true, output: JSON.stringify(data, null, 2) };
+            }
+
+            else if (action === 'process_path') {
+                if (!target) return { success: false, output: 'Must provide target PID.' };
+                const cmd = 'powershell -Command "Get-Process -Id ' + target + ' | Select-Object Id, ProcessName, Path | ConvertTo-Json"';
+                const { stdout } = await execAsync(cmd);
+                return { success: true, output: stdout.trim() };
+            }
+            
+            else if (action === 'deep_security_scan') {
+                // Runs a comprehensive Windows Defender quick scan and checks Firewall status
+                const { stdout: firewall } = await execAsync('powershell -Command "Get-NetFirewallProfile | Select-Object Name, Enabled | ConvertTo-Json -Compress"');
+                const { stdout: av } = await execAsync('powershell -Command "Get-MpComputerStatus | Select-Object AMServiceEnabled, RealTimeProtectionEnabled, AntivirusSignatureLastUpdated | ConvertTo-Json -Compress"');
+                
+                return { success: true, output: "System Security Status:\\nFIREWALL: " + firewall.trim() + "\\nANTIVIRUS: " + av.trim() + "\\n\\n(Note: Network and Process analysis must be done separately using 'network_status' and 'list_processes')" };
             }
             
             else {
