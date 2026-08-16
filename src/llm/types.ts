@@ -7,9 +7,20 @@ export interface Message {
     content: string;
 }
 
+export interface RoutingPreferences {
+    priority?: 'cost' | 'latency' | 'capability';
+    requireTools?: boolean;
+    requireVision?: boolean;
+    requireStreaming?: boolean;
+    maxCost?: 'low' | 'medium' | 'high';
+}
+
 export interface GenerationOptions {
     temperature?: number;
     maxOutputTokens?: number;
+    provider?: string;
+    onToken?: (text: string) => void;
+    routing?: RoutingPreferences;
 }
 
 export interface ToolCall {
@@ -39,7 +50,20 @@ export interface LLMResponse {
     continuationId?: string;
 }
 
+export interface ProviderMetadata {
+    name: string;
+    capabilities: {
+        tools: boolean;
+        vision: boolean;
+        streaming: boolean;
+    };
+    cost: 'low' | 'medium' | 'high';
+    latency: 'low' | 'medium' | 'high';
+}
+
 export interface LLMProvider {
+    getMetadata(): ProviderMetadata;
+
     generate(
         messages: Message[],
         options?: GenerationOptions,
@@ -49,6 +73,8 @@ export interface LLMProvider {
     continueWithToolResults(
         continuationId: string,
         results: ToolResult[],
+        messages: Message[],
+        options?: GenerationOptions,
         tools?: ToolSchema[]
     ): Promise<LLMResponse>;
 }

@@ -13,44 +13,68 @@ import { ToolOrchestrator } from '../tools/orchestrator.js';
 
 import type { ToolContext } from '../tools/types.js';
 
+import { CloudMemoryManager } from './memory.js';
+
 export class AthenaCore {
     private readonly router: LLMRouter;
-    private readonly history: Message[];
+    private history: Message[];
 
     private readonly toolRegistry: ToolRegistry;
     private readonly toolOrchestrator: ToolOrchestrator;
     private readonly toolContext: ToolContext;
+    private readonly memoryManager: CloudMemoryManager;
 
     constructor(
         router: LLMRouter,
         toolRegistry: ToolRegistry,
         toolOrchestrator: ToolOrchestrator,
-        toolContext: ToolContext
+        toolContext: ToolContext,
+        memoryManager: CloudMemoryManager
     ) {
         this.router = router;
         this.toolRegistry = toolRegistry;
         this.toolOrchestrator = toolOrchestrator;
         this.toolContext = toolContext;
+        this.memoryManager = memoryManager;
 
-        this.history = [
-            {
-                role: 'system',
-                content: ATHENA_SYSTEM_PROMPT,
-            },
-        ];
+        this.history = [];
     }
 
-    async chat(userInput: string): Promise<string> {
-        this.history.push({
+    async initialize() {
+        const savedHistory = await this.memoryManager.loadHistory();
+        if (savedHistory.length > 0) {
+            this.history = savedHistory;
+        } else {
+            this.history = [
+                {
+                    role: 'system',
+                    content: ATHENA_SYSTEM_PROMPT,
+                },
+            ];
+            await this.memoryManager.syncMessage(this.history[0]);
+        }
+    }
+
+    async chat(userInput: string, onToken?: (text: string) => void): Promise<string> {
+        const userMsg: Message = {
             role: 'user',
             content: userInput,
-        });
+        };
+        this.history.push(userMsg);
+        await this.memoryManager.syncMessage(userMsg);
 
         try {
+            const routing = {
+                priority: 'latency' as const, // For standard user interactions, prioritize fast responses
+                requireTools: true, // We want the ability to use tools by default
+            };
+
             const response = await this.router.generate(
                 this.history,
                 {
                     temperature: 0.7,
+                    onToken,
+                    routing,
                 },
                 this.toolRegistry.getSchemas()
             );
@@ -62,16 +86,19 @@ export class AthenaCore {
             ) {
                 return await this.handleToolCalls(
                     response.toolCalls,
-                    response.continuationId
+                    response.continuationId,
+                    onToken
                 );
+            } else {
+                const modelMsg: Message = {
+                    role: 'model',
+                    content: response.text,
+                };
+                this.history.push(modelMsg);
+                await this.memoryManager.syncMessage(modelMsg);
+
+                return response.text;
             }
-
-            this.history.push({
-                role: 'model',
-                content: response.text,
-            });
-
-            return response.text;
         } catch (error) {
             this.history.pop();
 
@@ -86,15 +113,12 @@ export class AthenaCore {
 
     private async handleToolCalls(
         toolCalls: ToolCall[],
-        continuationId: string
+        continuationId: string,
+        onToken?: (text: string) => void
     ): Promise<string> {
         const results: ToolResult[] = [];
 
         for (const toolCall of toolCalls) {
-            console.log(
-                `[ATHENA] Executing tool '${toolCall.name}'...`
-            );
-
             const result =
                 await this.toolOrchestrator.handle(
                     {
@@ -103,13 +127,6 @@ export class AthenaCore {
                     },
                     this.toolContext
                 );
-
-            console.log(
-                `[ATHENA] Tool '${toolCall.name}': ${result.success
-                    ? 'success'
-                    : 'failed'
-                }`
-            );
 
             results.push({
                 toolCallId: toolCall.id,
@@ -128,6 +145,15 @@ export class AthenaCore {
             await this.router.continueWithToolResults(
                 continuationId,
                 results,
+                this.history,
+                { 
+                    temperature: 0.7, 
+                    onToken,
+                    routing: {
+                        priority: 'latency',
+                        requireTools: true,
+                    }
+                },
                 this.toolRegistry.getSchemas()
             );
 
@@ -144,16 +170,26 @@ export class AthenaCore {
         ) {
             return await this.handleToolCalls(
                 response.toolCalls,
-                response.continuationId
+                response.continuationId,
+                onToken
             );
         }
+        let finalResponseText = response.text;
+        
+        if (!finalResponseText) {
+            const rawOutput = results.map(r => r.output || r.error).join('\n\n');
+            finalResponseText = `Here is the result of the operation:\n\n${rawOutput}`;
+            onToken?.(finalResponseText);
+        }
 
-        this.history.push({
+        const finalModelMsg: Message = {
             role: 'model',
-            content: response.text,
-        });
+            content: finalResponseText,
+        };
+        this.history.push(finalModelMsg);
+        await this.memoryManager.syncMessage(finalModelMsg);
 
-        return response.text;
+        return finalResponseText;
     }
 
     getConversationHistory(): readonly Message[] {
