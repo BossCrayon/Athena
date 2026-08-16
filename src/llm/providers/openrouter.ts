@@ -172,18 +172,20 @@ export class OpenRouterProvider implements LLMProvider {
             history.push({
                 role: 'tool',
                 tool_call_id: result.toolCallId,
+                name: result.toolName, // ADD NAME HERE
                 content: JSON.stringify({
                     success: result.success,
                     output: result.output,
                     ...(result.error ? { error: result.error } : {})
                 })
-            });
+            } as any); // Cast to any to bypass strict type check if name is not standard in their types
         }
 
         const stream = await this.client.chat.completions.create({
             model: this.model,
             messages: history,
-            max_tokens: 4096,
+            temperature: options?.temperature,
+            max_tokens: options?.maxOutputTokens ?? 1024,
             tools: this.convertTools(tools),
             stream: true
         });
