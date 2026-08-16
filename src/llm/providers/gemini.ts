@@ -1,11 +1,15 @@
 import { GoogleGenAI } from '@google/genai';
 
 import type {
-    LLMProvider,
-    Message,
     GenerationOptions,
+    LLMProvider,
     LLMResponse,
+    Message,
+    ToolCall,
+    ToolResult,
 } from '../types.js';
+
+import type { ToolSchema } from '../../tools/schema.js';
 
 export class GeminiProvider implements LLMProvider {
     private readonly ai: GoogleGenAI;
@@ -27,7 +31,8 @@ export class GeminiProvider implements LLMProvider {
 
     async generate(
         messages: Message[],
-        _options?: GenerationOptions
+        _options?: GenerationOptions,
+        tools?: ToolSchema[]
     ): Promise<LLMResponse> {
         const systemMessage = messages.find(
             (message) => message.role === 'system'
@@ -46,16 +51,159 @@ export class GeminiProvider implements LLMProvider {
             })
             .join('\n\n');
 
+        const toolDeclarations = tools?.map((tool) => {
+            const properties: Record<string, unknown> = {};
+            const required: string[] = [];
+
+            for (const parameter of tool.parameters) {
+                properties[parameter.name] = {
+                    type: parameter.type,
+                    description: parameter.description,
+                };
+
+                if (parameter.required) {
+                    required.push(parameter.name);
+                }
+            }
+
+            return {
+                type: 'function' as const,
+                name: tool.name,
+                description: tool.description,
+                parameters: {
+                    type: 'object' as const,
+                    properties,
+                    required,
+                },
+            };
+        });
+
         const interaction = await this.ai.interactions.create({
             model: this.model,
 
-            system_instruction: systemMessage?.content,
+            ...(systemMessage?.content
+                ? {
+                    system_instruction: systemMessage.content,
+                }
+                : {}),
 
             input: conversationText,
+
+            ...(toolDeclarations
+                ? {
+                    tools: toolDeclarations,
+                }
+                : {}),
         });
+
+        const toolCalls: ToolCall[] = interaction.steps
+            .filter((step) => step.type === 'function_call')
+            .map((step) => ({
+                id: step.id,
+                name: step.name,
+                arguments: step.arguments as Record<string, unknown>,
+            }));
 
         return {
             text: interaction.output_text ?? '',
+            continuationId: interaction.id,
+            ...(toolCalls.length > 0
+                ? { toolCalls }
+                : {}),
+        };
+    }
+
+    async continueWithToolResults(
+        continuationId: string,
+        results: ToolResult[],
+        tools?: ToolSchema[]
+    ): Promise<LLMResponse> {
+        const toolDeclarations = tools?.map((tool) => {
+            const properties: Record<string, unknown> = {};
+            const required: string[] = [];
+
+            for (const parameter of tool.parameters) {
+                properties[parameter.name] = {
+                    type: parameter.type,
+                    description: parameter.description,
+                };
+
+                if (parameter.required) {
+                    required.push(parameter.name);
+                }
+            }
+
+            return {
+                type: 'function' as const,
+                name: tool.name,
+                description: tool.description,
+                parameters: {
+                    type: 'object' as const,
+                    properties,
+                    required,
+                },
+            };
+        });
+
+        const input = results.map((result) => ({
+            type: 'function_result' as const,
+            name: result.toolName,
+            call_id: result.toolCallId,
+            result: [
+                {
+                    type: 'text' as const,
+                    text: JSON.stringify({
+                        success: result.success,
+                        output: result.output,
+                        ...(result.error !== undefined
+                            ? {
+                                error: result.error,
+                            }
+                            : {}),
+                    }),
+                },
+            ],
+        }));
+
+        const interaction =
+            await this.ai.interactions.create({
+                model: this.model,
+
+                previous_interaction_id: continuationId,
+
+                input,
+
+                ...(toolDeclarations
+                    ? {
+                        tools: toolDeclarations,
+                    }
+                    : {}),
+            });
+
+        const toolCalls: ToolCall[] =
+            interaction.steps
+                .filter(
+                    (step) =>
+                        step.type === 'function_call'
+                )
+                .map((step) => ({
+                    id: step.id,
+                    name: step.name,
+                    arguments:
+                        step.arguments as Record<
+                            string,
+                            unknown
+                        >,
+                }));
+
+        return {
+            text: interaction.output_text ?? '',
+            continuationId: interaction.id,
+            ...(toolCalls.length > 0
+                ? {
+                    toolCalls,
+                }
+                : {}),
         };
     }
 }

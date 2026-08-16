@@ -4,7 +4,16 @@ import * as dotenv from 'dotenv';
 import { AthenaCore } from '../core/athena.js';
 import { LLMRouter } from '../llm/router.js';
 import { GeminiProvider } from '../llm/providers/gemini.js';
+
+import { ToolRegistry } from '../tools/registry.js';
+import { ToolExecutor } from '../tools/executor.js';
+import { ToolOrchestrator } from '../tools/orchestrator.js';
+import { PermissionManager } from '../tools/permission.js';
+
+import { systemInfoTool } from '../tools/system-info.js';
+
 import { handleCommand } from './commands.js';
+import { currentTimeTool } from '../tools/current-time.js';
 
 dotenv.config();
 
@@ -26,9 +35,45 @@ async function main(): Promise<void> {
 
     console.log('[System] Initializing ATHENA Core...');
 
+    // --------------------------------------------------
+    // LLM
+    // --------------------------------------------------
+
     const provider = new GeminiProvider();
     const router = new LLMRouter(provider);
-    const athena = new AthenaCore(router);
+
+    // --------------------------------------------------
+    // Tools
+    // --------------------------------------------------
+
+    const toolRegistry = new ToolRegistry();
+
+    toolRegistry.register(systemInfoTool);
+    toolRegistry.register(currentTimeTool);
+    const permissions = new PermissionManager();
+
+    const executor = new ToolExecutor(
+        toolRegistry,
+        permissions
+    );
+
+    const toolOrchestrator = new ToolOrchestrator(
+        toolRegistry,
+        executor
+    );
+
+    // --------------------------------------------------
+    // ATHENA
+    // --------------------------------------------------
+
+    const athena = new AthenaCore(
+        router,
+        toolRegistry,
+        toolOrchestrator,
+        {
+            workingDirectory: process.cwd(),
+        }
+    );
 
     console.log('[System] ATHENA is online.');
     console.log("[System] Type '/help' for available commands.\n");
@@ -44,6 +89,7 @@ async function main(): Promise<void> {
             // Handle local CLI commands BEFORE contacting the LLM.
             const result = handleCommand(input, {
                 getHistoryLength: () => athena.getHistoryLength(),
+                toolRegistry,
             });
 
             if (result.handled) {
@@ -87,7 +133,10 @@ async function main(): Promise<void> {
                 readline.clearLine(process.stdout, 0);
                 readline.cursorTo(process.stdout, 0);
 
-                console.error('[System] Unexpected error:', error);
+                console.error(
+                    '[System] Unexpected error:',
+                    error
+                );
             }
 
             askQuestion();
@@ -99,6 +148,7 @@ async function main(): Promise<void> {
 
 main().catch((error: unknown) => {
     console.error('[System] Fatal error:', error);
+
     rl.close();
     process.exitCode = 1;
 });

@@ -1,4 +1,5 @@
 import type { Tool } from './types.js';
+import type { ToolSchema } from './schema.js';
 
 export class ToolRegistry {
     private readonly tools = new Map<string, Tool>();
@@ -23,5 +24,11 @@ export class ToolRegistry {
 
     list(): Tool[] {
         return [...this.tools.values()];
+    }
+
+    getSchemas(): ToolSchema[] {
+        return Array.from(this.tools.values()).map(
+            (tool) => tool.definition.schema
+        );
     }
 }
