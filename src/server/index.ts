@@ -44,9 +44,14 @@ async function setupAthena(nodeManager: NodeManager) {
     const fallbackOrder: string[] = [];
 
     if (process.env.GEMINI_API_KEY) {
-        router.registerProvider('gemini', new GeminiProvider());
-        router.setDefaultProvider('gemini');
-        fallbackOrder.push('gemini');
+        router.registerProvider('gemini-3.6-flash', new GeminiProvider('gemini-3.6-flash'));
+        router.registerProvider('gemini-3.5-flash-lite', new GeminiProvider('gemini-3.5-flash-lite'));
+        router.registerProvider('gemini-3.1-flash-lite', new GeminiProvider('gemini-3.1-flash-lite'));
+        
+        router.setDefaultProvider('gemini-3.6-flash');
+        fallbackOrder.push('gemini-3.6-flash');
+        fallbackOrder.push('gemini-3.5-flash-lite');
+        fallbackOrder.push('gemini-3.1-flash-lite');
     }
     if (process.env.OPENROUTER_API_KEY) {
         router.registerProvider('openrouter', new OpenRouterProvider());
