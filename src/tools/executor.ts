@@ -63,7 +63,7 @@ export class ToolExecutor {
         try {
             // Tools that MUST run on the physical device node
             const localDeviceTools = [
-                'system_info', 'run_command', 'locate_item', 
+                'get_system_info', 'run_command', 'locate_item', 
                 'system_control', 'list_directory', 'read_file', 'search_files'
             ];
 
