@@ -1,3 +1,3 @@
 Set WshShell = CreateObject("WScript.Shell")
 WshShell.CurrentDirectory = "C:\Athena"
-WshShell.Run "npx.cmd tsx src/node/index.ts", 0, False
+WshShell.Run "npm.cmd run node", 0, False
