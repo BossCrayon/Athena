@@ -74,9 +74,11 @@ export class ToolExecutor {
 
             if (this.nodeManager) {
                 if (laptopDeviceTools.includes(toolName)) {
-                    return await this.nodeManager.executeToolOnNode(toolName, args, 'laptop') as ToolResult;
+                    const output = await this.nodeManager.executeToolOnNode(toolName, args, 'laptop');
+                    return { success: true, output: String(output) };
                 } else if (mobileDeviceTools.includes(toolName)) {
-                    return await this.nodeManager.executeToolOnNode(toolName, args, 'mobile') as ToolResult;
+                    const output = await this.nodeManager.executeToolOnNode(toolName, args, 'mobile');
+                    return { success: true, output: String(output) };
                 }
             }
             
