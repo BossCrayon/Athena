@@ -28,6 +28,9 @@ import { locateItemTool } from '../tools/locate-item.js';
 import { systemControlTool } from '../tools/system-control.js';
 import { saveMemoryTool } from '../tools/save-memory.js';
 import { searchMemoryTool } from '../tools/search-memory.js';
+import { getBatteryLevelTool } from '../tools/get-battery.js';
+import { vibratePhoneTool } from '../tools/vibrate-phone.js';
+import { getLocationTool } from '../tools/get-location.js';
 
 dotenv.config();
 
@@ -69,6 +72,10 @@ async function setupAthena(nodeManager: NodeManager) {
     toolRegistry.register(systemControlTool);
     toolRegistry.register(saveMemoryTool);
     toolRegistry.register(searchMemoryTool);
+    toolRegistry.register(getBatteryLevelTool);
+    toolRegistry.register(vibratePhoneTool);
+    toolRegistry.register(getLocationTool);
+
 
     const permissions = new PermissionManager();
     const executor = new ToolExecutor(toolRegistry, permissions, nodeManager);
@@ -123,7 +130,8 @@ fastify.register(async function (app) {
             try {
                 const data = JSON.parse(message);
                 if (data.type === 'node_register') {
-                    nodeManager.registerNode(connection, data.id, data.name);
+                    const nodeType = data.nodeType || 'laptop';
+                    nodeManager.registerNode(connection, data.id, data.name, nodeType);
                 }
             } catch (err) {
                 console.error('Node WS Error:', err);

@@ -61,18 +61,27 @@ export class ToolExecutor {
         }
 
         try {
-            // Tools that MUST run on the physical device node
-            const localDeviceTools = [
+            // Tools that MUST run on the physical laptop device node
+            const laptopDeviceTools = [
                 'get_system_info', 'run_command', 'locate_item', 
                 'system_control', 'list_directory', 'read_file', 'search_files'
             ];
 
-            if (this.nodeManager && localDeviceTools.includes(toolName)) {
-                return await this.nodeManager.executeToolOnNode(toolName, args) as ToolResult;
-            } else {
-                // Cloud-native tools (memory, weather, web search) run directly on the Brain
-                return await tool.execute(args, context);
+            // Tools that MUST run on the physical mobile device node
+            const mobileDeviceTools = [
+                'get_battery_level', 'vibrate_phone', 'get_location'
+            ];
+
+            if (this.nodeManager) {
+                if (laptopDeviceTools.includes(toolName)) {
+                    return await this.nodeManager.executeToolOnNode(toolName, args, 'laptop') as ToolResult;
+                } else if (mobileDeviceTools.includes(toolName)) {
+                    return await this.nodeManager.executeToolOnNode(toolName, args, 'mobile') as ToolResult;
+                }
             }
+            
+            // Cloud-native tools (memory, weather, web search) run directly on the Brain
+            return await tool.execute(args, context);
         } catch (error) {
             return {
                 success: false,

@@ -5,15 +5,16 @@ export interface ConnectedNode {
     id: string;
     ws: WebSocket;
     name: string;
+    type: string;
 }
 
 export class NodeManager {
     private nodes = new Map<string, ConnectedNode>();
     private pendingToolCalls = new Map<string, { resolve: (res: any) => void; reject: (err: any) => void }>();
 
-    registerNode(ws: WebSocket, id: string, name: string) {
-        this.nodes.set(id, { id, ws, name });
-        console.log(`[NodeManager] Registered node: ${name} (${id})`);
+    registerNode(ws: WebSocket, id: string, name: string, type: string = 'laptop') {
+        this.nodes.set(id, { id, ws, name, type });
+        console.log(`[NodeManager] Registered node: ${name} (${id}) [${type}]`);
         
         ws.on('close', () => {
             this.nodes.delete(id);
@@ -36,10 +37,10 @@ export class NodeManager {
         });
     }
 
-    async executeToolOnNode(toolName: string, args: Record<string, unknown>): Promise<any> {
-        const node = Array.from(this.nodes.values())[0]; // Simplification: pick first available node
+    async executeToolOnNode(toolName: string, args: Record<string, unknown>, targetType: string = 'laptop'): Promise<any> {
+        const node = Array.from(this.nodes.values()).find(n => n.type === targetType);
         if (!node) {
-            throw new Error('No device nodes currently connected to handle this tool execution.');
+            throw new Error(`No connected nodes of type '${targetType}' found to execute tool: ${toolName}. Please ensure the ${targetType} is connected.`);
         }
 
         const callId = randomUUID();
