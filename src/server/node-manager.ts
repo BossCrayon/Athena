@@ -38,6 +38,8 @@ export class NodeManager {
     }
 
     async executeToolOnNode(toolName: string, args: Record<string, unknown>, targetType: string = 'laptop'): Promise<any> {
+        console.log(`[NodeManager] executeToolOnNode called for ${toolName} with targetType=${targetType}`);
+        console.log(`[NodeManager] Currently registered nodes:`, Array.from(this.nodes.values()).map(n => `${n.name} (${n.type})`));
         const node = Array.from(this.nodes.values()).find(n => n.type === targetType);
         if (!node) {
             throw new Error(`No connected nodes of type '${targetType}' found to execute tool: ${toolName}. Please ensure the ${targetType} is connected.`);
