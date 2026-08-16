@@ -11,8 +11,11 @@ export async function generateEmbedding(text: string): Promise<number[]> {
     }
 
     const response = await ai.models.embedContent({
-        model: 'text-embedding-004',
+        model: 'gemini-embedding-2',
         contents: text,
+        config: {
+            outputDimensionality: 768
+        }
     });
     
     return response.embeddings?.[0]?.values || [];
