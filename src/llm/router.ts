@@ -110,6 +110,7 @@ export class LLMRouter {
                 return await provider.generate(messages, options, tools);
             } catch (error) {
                 lastError = error;
+                console.warn(`[LLMRouter] Provider '${providerName}' failed during generate:`, error);
                 // Continue to the next provider
             }
         }
