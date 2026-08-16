@@ -61,9 +61,16 @@ export class ToolExecutor {
         }
 
         try {
-            if (this.nodeManager) {
+            // Tools that MUST run on the physical device node
+            const localDeviceTools = [
+                'system_info', 'run_command', 'locate_item', 
+                'system_control', 'list_directory', 'read_file', 'search_files'
+            ];
+
+            if (this.nodeManager && localDeviceTools.includes(toolName)) {
                 return await this.nodeManager.executeToolOnNode(toolName, args) as ToolResult;
             } else {
+                // Cloud-native tools (memory, weather, web search) run directly on the Brain
                 return await tool.execute(args, context);
             }
         } catch (error) {
