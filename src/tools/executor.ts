@@ -4,11 +4,13 @@ import type {
     ToolContext,
     ToolResult,
 } from './types.js';
+import type { NodeManager } from '../server/node-manager.js';
 
 export class ToolExecutor {
     constructor(
         private readonly registry: ToolRegistry,
-        private readonly permissions: PermissionManager
+        private readonly permissions: PermissionManager,
+        private readonly nodeManager?: NodeManager
     ) { }
 
     async execute(
@@ -59,7 +61,11 @@ export class ToolExecutor {
         }
 
         try {
-            return await tool.execute(args, context);
+            if (this.nodeManager) {
+                return await this.nodeManager.executeToolOnNode(toolName, args) as ToolResult;
+            } else {
+                return await tool.execute(args, context);
+            }
         } catch (error) {
             return {
                 success: false,

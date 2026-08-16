@@ -12,6 +12,7 @@ import { ToolExecutor } from '../tools/executor.js';
 import { ToolOrchestrator } from '../tools/orchestrator.js';
 import { PermissionManager } from '../tools/permission.js';
 import { CloudMemoryManager } from '../core/memory.js';
+import { NodeManager } from './node-manager.js';
 
 // Tools
 import { systemInfoTool } from '../tools/system-info.js';
@@ -35,7 +36,7 @@ fastify.register(cors, { origin: true });
 fastify.register(websocket);
 
 // Initialize ATHENA backend
-async function setupAthena() {
+async function setupAthena(nodeManager: NodeManager) {
     const router = new LLMRouter();
     const fallbackOrder: string[] = [];
 
@@ -70,7 +71,7 @@ async function setupAthena() {
     toolRegistry.register(searchMemoryTool);
 
     const permissions = new PermissionManager();
-    const executor = new ToolExecutor(toolRegistry, permissions);
+    const executor = new ToolExecutor(toolRegistry, permissions, nodeManager);
     const toolOrchestrator = new ToolOrchestrator(toolRegistry, executor);
     const memoryManager = new CloudMemoryManager();
 
@@ -91,7 +92,8 @@ async function setupAthena() {
 }
 
 fastify.register(async function (app) {
-    const athena = await setupAthena();
+    const nodeManager = new NodeManager();
+    const athena = await setupAthena(nodeManager);
 
     app.get('/chat', { websocket: true }, (connection: any, req) => {
         connection.on('message', async (message: string) => {
@@ -112,6 +114,19 @@ fastify.register(async function (app) {
                 }
             } catch (err) {
                 console.error('WS Error:', err);
+            }
+        });
+    });
+
+    app.get('/nodes', { websocket: true }, (connection: any, req) => {
+        connection.on('message', (message: string) => {
+            try {
+                const data = JSON.parse(message);
+                if (data.type === 'node_register') {
+                    nodeManager.registerNode(connection, data.id, data.name);
+                }
+            } catch (err) {
+                console.error('Node WS Error:', err);
             }
         });
     });

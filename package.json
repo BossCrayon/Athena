@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "chat": "tsx src/cli/index.ts",
-    "server": "tsx src/server/index.ts"
+    "server": "tsx src/server/index.ts",
+    "node": "tsx src/node/index.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",
