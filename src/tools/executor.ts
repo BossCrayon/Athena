@@ -40,11 +40,22 @@ export class ToolExecutor {
         }
 
         if (permission.decision === 'confirm') {
-            return {
-                success: false,
-                output: '',
-                error: `User confirmation required: ${permission.reason}`,
-            };
+            if (!context.askPermission) {
+                return {
+                    success: false,
+                    output: '',
+                    error: `User confirmation required, but no interactive prompt is available.`,
+                };
+            }
+
+            const allowed = await context.askPermission(tool.definition.name, args);
+            if (!allowed) {
+                return {
+                    success: false,
+                    output: '',
+                    error: `Permission denied by user.`,
+                };
+            }
         }
 
         try {

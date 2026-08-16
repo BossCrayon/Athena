@@ -73,10 +73,17 @@ async function main(): Promise<void> {
     // Tools
     // --------------------------------------------------
 
+    const { webSearchTool } = await import('../tools/web-search.js');
+    const { fetchUrlTool } = await import('../tools/fetch-url.js');
+    const { getWeatherTool } = await import('../tools/get-weather.js');
+
     const toolRegistry = new ToolRegistry();
 
     toolRegistry.register(systemInfoTool);
     toolRegistry.register(currentTimeTool);
+    toolRegistry.register(webSearchTool);
+    toolRegistry.register(fetchUrlTool);
+    toolRegistry.register(getWeatherTool);
     const permissions = new PermissionManager();
 
     const executor = new ToolExecutor(
@@ -96,12 +103,32 @@ async function main(): Promise<void> {
     const { CloudMemoryManager } = await import('../core/memory.js');
     const memoryManager = new CloudMemoryManager();
 
+    const { VoiceManager } = await import('../core/voice.js');
+    const voiceManager = new VoiceManager();
+    let voiceMode = false;
+    let isRecording = false;
+
     const athena = new AthenaCore(
         router,
         toolRegistry,
         toolOrchestrator,
         {
-            workingDirectory: process.cwd(),
+            cwd: process.cwd(),
+            askPermission: async (toolName: string, args: Record<string, unknown>) => {
+                return new Promise((resolve) => {
+                    const argsString = JSON.stringify(args, null, 2);
+                    console.log(`\n[System] ATHENA is requesting to execute the external tool: '${toolName}'`);
+                    console.log(`Arguments:\n${argsString}`);
+                    
+                    rl.question(`Allow this action? (y/N): `, (answer) => {
+                        const isAllowed = answer.trim().toLowerCase() === 'y';
+                        if (!isAllowed) {
+                            console.log(`[System] Tool execution denied.`);
+                        }
+                        resolve(isAllowed);
+                    });
+                });
+            }
         },
         memoryManager
     );
@@ -112,8 +139,55 @@ async function main(): Promise<void> {
     console.log("[System] Type '/help' for available commands.\n");
 
     const askQuestion = (): void => {
-        rl.question('You: ', async (input: string) => {
-            // Ignore empty input.
+        rl.question(voiceMode ? (isRecording ? '' : 'Press [ENTER] to record (or type /voice to disable)...') : 'You: ', async (input: string) => {
+            if (input.trim() === '/voice') {
+                voiceMode = !voiceMode;
+                console.log(`\n[System] Voice Mode is now ${voiceMode ? 'ON' : 'OFF'}.\n`);
+                askQuestion();
+                return;
+            }
+
+            // Handle Voice Mode interaction
+            if (voiceMode && input.trim() === '') {
+                if (!isRecording) {
+                    try {
+                        await voiceManager.startRecording();
+                        isRecording = true;
+                        console.log('\n[Voice] Recording... Press [ENTER] to stop.');
+                    } catch (err) {
+                        console.error('\n[Voice] Error starting recording:', err);
+                    }
+                    askQuestion();
+                    return;
+                } else {
+                    try {
+                        isRecording = false;
+                        const audioPath = await voiceManager.stopRecording();
+                        console.log('\n[Voice] Transcribing audio...');
+                        const transcribedText = await voiceManager.transcribeAudio(audioPath);
+                        console.log(`You (Voice): ${transcribedText}`);
+                        
+                        if (!transcribedText) {
+                            askQuestion();
+                            return;
+                        }
+                        
+                        // Treat the transcribed text as normal input
+                        input = transcribedText;
+                    } catch (err) {
+                        console.error('\n[Voice] Error processing recording:', err);
+                        isRecording = false;
+                        askQuestion();
+                        return;
+                    }
+                }
+            } else if (isRecording) {
+                // Ignore typed input while recording, wait for empty enter
+                askQuestion();
+                return;
+            }
+
+            // Ignore empty input in text mode
             if (!input.trim()) {
                 askQuestion();
                 return;
@@ -158,7 +232,9 @@ async function main(): Promise<void> {
             let isFirstToken = true;
 
             try {
+                let fullResponse = '';
                 await athena.chat(input, (text) => {
+                    fullResponse += text;
                     if (isFirstToken) {
                         readline.clearLine(process.stdout, 0);
                         readline.cursorTo(process.stdout, 0);
@@ -174,6 +250,10 @@ async function main(): Promise<void> {
                     process.stdout.write('ATHENA: \n');
                 } else {
                     console.log('\n');
+                }
+
+                if (voiceMode && fullResponse) {
+                    await voiceManager.speakText(fullResponse);
                 }
             } catch (error) {
                 readline.clearLine(process.stdout, 0);

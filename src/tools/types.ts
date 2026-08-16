@@ -12,7 +12,8 @@ export interface ToolDefinition {
 }
 
 export interface ToolContext {
-    workingDirectory: string;
+    cwd: string;
+    askPermission?: (toolName: string, args: Record<string, unknown>) => Promise<boolean>;
 }
 
 export interface ToolResult {

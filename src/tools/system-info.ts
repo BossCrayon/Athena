@@ -33,7 +33,7 @@ export const systemInfoTool: Tool = {
                 hostname: os.hostname(),
                 cpuCount: os.cpus().length,
                 nodeVersion: process.version,
-                workingDirectory: context.workingDirectory,
+                cwd: context.cwd,
             };
 
             return {

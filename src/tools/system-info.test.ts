@@ -25,7 +25,7 @@ if (permission.decision !== 'allow') {
 const result = await tool.execute(
     {},
     {
-        workingDirectory: process.cwd(),
+        cwd: process.cwd(),
     }
 );
 
