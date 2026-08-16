@@ -17,7 +17,7 @@ export class OpenRouterProvider implements LLMProvider {
     // We keep state locally because OpenRouter doesn't have stateful interaction IDs like Gemini
     private readonly sessions = new Map<string, OpenAI.Chat.ChatCompletionMessageParam[]>();
 
-    constructor(modelName: string = 'google/gemini-2.5-flash') {
+    constructor(modelName: string = 'google/gemini-3.6-flash') {
         const apiKey = process.env.OPENROUTER_API_KEY;
 
         if (!apiKey) {
@@ -92,7 +92,7 @@ export class OpenRouterProvider implements LLMProvider {
             model: this.model,
             messages: formattedMessages,
             temperature: options?.temperature,
-            max_tokens: options?.maxOutputTokens ?? 4096,
+            max_tokens: options?.maxOutputTokens ?? 1024,
             tools: this.convertTools(tools),
             stream: true
         });
