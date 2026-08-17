@@ -46,8 +46,8 @@ export const systemControlTool: Tool = {
                     uptime: (os.uptime() / 3600).toFixed(2) + ' hours'
                 };
                 return { success: true, output: JSON.stringify(info, null, 2) };
-            } 
-            
+            }
+
             else if (action === 'advanced_hardware_info') {
                 // Gets deeper hardware level info (GPU, BIOS, Disks)
                 const script = `
@@ -59,29 +59,29 @@ export const systemControlTool: Tool = {
                 const { stdout } = await execAsync('powershell -Command "' + script.replace(/\\n/g, '') + '"');
                 return { success: true, output: stdout.trim() };
             }
-            
+
             else if (action === 'list_apps') {
                 const cmd = 'powershell -Command "Get-Process | Where-Object {$_.MainWindowTitle} | Select-Object Id, ProcessName, MainWindowTitle | ConvertTo-Json"';
                 const { stdout } = await execAsync(cmd);
                 if (!stdout || stdout.trim() === '') return { success: true, output: 'No visible applications found.' };
                 return { success: true, output: stdout };
-            } 
-            
+            }
+
             else if (action === 'list_processes') {
                 const cmd = 'tasklist';
                 const { stdout } = await execAsync(cmd);
                 let output = stdout;
                 if (output.length > 10000) output = output.substring(0, 10000) + '\\n...[TRUNCATED]...';
                 return { success: true, output };
-            } 
-            
+            }
+
             else if (action === 'kill_process') {
                 if (!target) return { success: false, output: 'Must provide target process name.' };
                 const cmd = 'taskkill /F /IM "' + target + '" /T';
                 const { stdout } = await execAsync(cmd);
                 return { success: true, output: stdout };
-            } 
-            
+            }
+
             else if (action === 'open_app') {
                 if (!target) return { success: false, output: 'Must provide target app name.' };
                 // Start-Process starts it asynchronously so it doesn't block the server
@@ -89,13 +89,13 @@ export const systemControlTool: Tool = {
                 await execAsync(cmd);
                 return { success: true, output: 'Successfully sent command to open: ' + target };
             }
-            
+
             else if (action === 'lock_system') {
                 const cmd = 'rundll32.exe user32.dll,LockWorkStation';
                 await execAsync(cmd);
                 return { success: true, output: 'Successfully locked the workstation.' };
             }
-            
+
             else if (action === 'network_status') {
                 // Gets active TCP/UDP connections and listening ports with PIDs
                 const cmd = 'netstat -ano';
@@ -104,7 +104,7 @@ export const systemControlTool: Tool = {
                 if (output.length > 15000) output = output.substring(0, 15000) + '\\n...[TRUNCATED]...';
                 return { success: true, output };
             }
-            
+
             else if (action === 'ip_lookup') {
                 if (!target) return { success: false, output: 'Must provide target IP address.' };
                 const res = await fetch('http://ip-api.com/json/' + target);
@@ -118,15 +118,15 @@ export const systemControlTool: Tool = {
                 const { stdout } = await execAsync(cmd);
                 return { success: true, output: stdout.trim() };
             }
-            
+
             else if (action === 'deep_security_scan') {
                 // Runs a comprehensive Windows Defender quick scan and checks Firewall status
                 const { stdout: firewall } = await execAsync('powershell -Command "Get-NetFirewallProfile | Select-Object Name, Enabled | ConvertTo-Json -Compress"');
                 const { stdout: av } = await execAsync('powershell -Command "Get-MpComputerStatus | Select-Object AMServiceEnabled, RealTimeProtectionEnabled, AntivirusSignatureLastUpdated | ConvertTo-Json -Compress"');
-                
+
                 return { success: true, output: "System Security Status:\\nFIREWALL: " + firewall.trim() + "\\nANTIVIRUS: " + av.trim() + "\\n\\n(Note: Network and Process analysis must be done separately using 'network_status' and 'list_processes')" };
             }
-            
+
             else {
                 return { success: false, output: 'Unknown action: ' + action };
             }
