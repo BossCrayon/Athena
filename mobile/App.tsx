@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   StyleSheet,
   Text,
@@ -10,8 +10,14 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
+  Animated,
+  Keyboard,
+  TouchableWithoutFeedback,
+  Dimensions,
+  Image,
 } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as Battery from 'expo-battery';
 import * as Haptics from 'expo-haptics';
 import * as Location from 'expo-location';
@@ -20,8 +26,9 @@ import * as SecureStore from 'expo-secure-store';
 import * as Crypto from 'expo-crypto';
 import * as ImagePicker from 'expo-image-picker';
 
-const DEFAULT_WS_URL = 'wss://athena-brain.onrender.com';
+const DEFAULT_WS_URL = 'wss://my-athena-brain.loca.lt';
 const NODE_CAPABILITIES = ['get_battery_level', 'vibrate_phone', 'get_location', 'capture_image'];
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 interface Message {
   id: string;
@@ -31,16 +38,19 @@ interface Message {
   toolAction?: string;
 }
 
+// ─────────────────────────────────────────
+// ROOT APP
+// ─────────────────────────────────────────
 export default function App() {
-  const [mode, setMode] = useState<'selecting' | 'ai' | 'hardware' | 'auth'>('selecting');
-  const [tokenInput, setTokenInput] = useState('');
-  const [hasToken, setHasToken] = useState(false);
+  const [appState, setAppState] = useState<'loading' | 'register' | 'chat'>('loading');
+  const [deviceToken, setDeviceToken] = useState('');
+  const [deviceRole, setDeviceRole] = useState<'admin' | 'user'>('user');
   const [nodeId, setNodeId] = useState('');
   const [serverUrl, setServerUrl] = useState(DEFAULT_WS_URL);
-  const [urlInput, setUrlInput] = useState('');
 
   useEffect(() => {
-    async function loadIdentity() {
+    async function bootstrap() {
+      // Load or create node ID
       let storedId = await SecureStore.getItemAsync('ATHENA_MOBILE_NODE_ID');
       if (!storedId) {
         storedId = 'mobile-' + Crypto.randomUUID();
@@ -48,155 +58,261 @@ export default function App() {
       }
       setNodeId(storedId);
 
-      const storedToken = await SecureStore.getItemAsync('NODE_AUTH_TOKEN');
-      setHasToken(!!storedToken);
-      
+      // Check for stored server URL
       const storedUrl = await SecureStore.getItemAsync('ATHENA_SERVER_URL');
-      if (storedUrl) {
-          setServerUrl(storedUrl);
-          setUrlInput(storedUrl);
+      if (storedUrl) setServerUrl(storedUrl);
+
+      // Check for stored device token
+      const storedToken = await SecureStore.getItemAsync('ATHENA_DEVICE_TOKEN');
+      const storedRole = await SecureStore.getItemAsync('ATHENA_DEVICE_ROLE');
+      if (storedToken) {
+        setDeviceToken(storedToken);
+        setDeviceRole((storedRole as 'admin' | 'user') || 'user');
+        setAppState('chat');
       } else {
-          setUrlInput(DEFAULT_WS_URL);
+        setAppState('register');
       }
     }
-    loadIdentity();
+    bootstrap();
   }, []);
 
-  const handleSetToken = async () => {
-    if (tokenInput.trim()) {
-      await SecureStore.setItemAsync('NODE_AUTH_TOKEN', tokenInput.trim());
-      setHasToken(true);
-      setMode('hardware');
-    }
+  const handleRegistered = (token: string, role: 'admin' | 'user') => {
+    setDeviceToken(token);
+    setDeviceRole(role);
+    setAppState('chat');
   };
 
-  const handleClearToken = async () => {
-    await SecureStore.deleteItemAsync('NODE_AUTH_TOKEN');
-    setHasToken(false);
+  const handleLogout = async () => {
+    await SecureStore.deleteItemAsync('ATHENA_DEVICE_TOKEN');
+    await SecureStore.deleteItemAsync('ATHENA_DEVICE_ROLE');
+    setDeviceToken('');
+    setAppState('register');
   };
 
-  const handleSaveUrl = async () => {
-    if (urlInput.trim()) {
-      await SecureStore.setItemAsync('ATHENA_SERVER_URL', urlInput.trim());
-      setServerUrl(urlInput.trim());
-      Alert.alert('Saved', 'Server URL updated successfully.');
-    }
-  };
-
-  if (mode === 'selecting') {
+  if (appState === 'loading') {
     return (
-      <View style={styles.startupContainer}>
+      <LinearGradient colors={['#050d1a', '#0a1229', '#050d1a']} style={styles.loadingContainer}>
         <StatusBar style="light" />
-        <Text style={styles.startupTitle}>A T H E N A</Text>
-        <Text style={styles.startupSubtitle}>Select Initialization Mode</Text>
+        <Text style={styles.logoText}>A T H E N A</Text>
+        <ActivityIndicator color="#00e5ff" style={{ marginTop: 20 }} />
+      </LinearGradient>
+    );
+  }
 
-        <View style={{ width: '100%', marginBottom: 20, marginTop: 10 }}>
-          <Text style={{ color: '#8892b0', fontSize: 12, marginBottom: 5 }}>SERVER URL (For Local Testing):</Text>
-          <View style={{ flexDirection: 'row', width: '100%' }}>
+  if (appState === 'register') {
+    return (
+      <RegisterScreen
+        serverUrl={serverUrl}
+        onServerUrlChange={setServerUrl}
+        onRegistered={handleRegistered}
+      />
+    );
+  }
+
+  return (
+    <ChatScreen
+      deviceToken={deviceToken}
+      role={deviceRole}
+      nodeId={nodeId}
+      serverUrl={serverUrl}
+      onLogout={handleLogout}
+    />
+  );
+}
+
+// ─────────────────────────────────────────
+// REGISTER SCREEN
+// ─────────────────────────────────────────
+function RegisterScreen({
+  serverUrl,
+  onServerUrlChange,
+  onRegistered,
+}: {
+  serverUrl: string;
+  onServerUrlChange: (url: string) => void;
+  onRegistered: (token: string, role: 'admin' | 'user') => void;
+}) {
+  const [inviteCode, setInviteCode] = useState('');
+  const [userName, setUserName] = useState('');
+  const [urlInput, setUrlInput] = useState(serverUrl);
+  const [isLoading, setIsLoading] = useState(false);
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.timing(fadeAnim, { toValue: 1, duration: 800, useNativeDriver: true }).start();
+  }, []);
+
+  const handleRegister = async () => {
+    if (!inviteCode.trim() || !userName.trim()) {
+      Alert.alert('Missing Info', 'Please enter both your name and the invite code.');
+      return;
+    }
+
+    setIsLoading(true);
+    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    try {
+      const httpUrl = urlInput.replace('wss://', 'https://').replace('ws://', 'http://');
+      const response = await fetch(`${httpUrl}/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ hash: inviteCode.trim(), name: userName.trim() }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        Alert.alert('Authentication Failed', data.error || 'Invalid or expired invite code.');
+        setIsLoading(false);
+        return;
+      }
+
+      // Save credentials permanently
+      await SecureStore.setItemAsync('ATHENA_DEVICE_TOKEN', data.token);
+      await SecureStore.setItemAsync('ATHENA_DEVICE_ROLE', data.role);
+      await SecureStore.setItemAsync('ATHENA_SERVER_URL', urlInput.trim());
+      onServerUrlChange(urlInput.trim());
+
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      onRegistered(data.token, data.role);
+    } catch (e: any) {
+      Alert.alert('Connection Error', 'Could not reach the Athena server. Check the URL and try again.');
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+      <LinearGradient colors={['#050d1a', '#0a1229', '#050d1a']} style={{ flex: 1 }}>
+        <StatusBar style="light" />
+        <Animated.View style={[styles.registerContainer, { opacity: fadeAnim }]}>
+          <View style={styles.logoSection}>
+            <Text style={styles.logoText}>A T H E N A</Text>
+            <Text style={styles.logoSubtitle}>DEVICE REGISTRATION</Text>
+            <View style={styles.logoDivider} />
+          </View>
+
+          <View style={styles.registerCard}>
+            <Text style={styles.inputLabel}>YOUR NAME</Text>
             <TextInput
-              style={[styles.textInput, { flex: 1, marginBottom: 0 }]}
+              style={styles.glassInput}
+              placeholder="John Loreno"
+              placeholderTextColor="rgba(136,146,176,0.5)"
+              value={userName}
+              onChangeText={setUserName}
+              autoCapitalize="words"
+            />
+
+            <Text style={[styles.inputLabel, { marginTop: 20 }]}>INVITE CODE</Text>
+            <TextInput
+              style={[styles.glassInput, styles.codeInput]}
+              placeholder="Paste your 128-character invite code here..."
+              placeholderTextColor="rgba(136,146,176,0.4)"
+              value={inviteCode}
+              onChangeText={setInviteCode}
+              autoCapitalize="none"
+              autoCorrect={false}
+              multiline
+            />
+
+            <Text style={[styles.inputLabel, { marginTop: 20 }]}>SERVER URL</Text>
+            <TextInput
+              style={styles.glassInput}
+              placeholder="wss://..."
+              placeholderTextColor="rgba(136,146,176,0.4)"
               value={urlInput}
               onChangeText={setUrlInput}
               autoCapitalize="none"
               keyboardType="url"
             />
-            <TouchableOpacity style={[styles.sendButton, { width: 80, marginLeft: 10, marginTop: 0 }]} onPress={handleSaveUrl}>
-              <Text style={styles.sendButtonText}>SAVE</Text>
+
+            <TouchableOpacity
+              style={[styles.primaryButton, isLoading && styles.primaryButtonDisabled]}
+              onPress={handleRegister}
+              disabled={isLoading}
+            >
+              {isLoading ? (
+                <ActivityIndicator color="#000" />
+              ) : (
+                <Text style={styles.primaryButtonText}>REGISTER DEVICE</Text>
+              )}
             </TouchableOpacity>
           </View>
-        </View>
 
-        <TouchableOpacity style={styles.modeCard} onPress={() => setMode('ai')}>
-          <Text style={styles.modeCardTitle}>Just AI (Standard)</Text>
-          <Text style={styles.modeCardDesc}>Connect to Athena's Cloud Brain for chatting and searching only. No hardware access.</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity 
-          style={styles.modeCardHardware} 
-          onPress={() => hasToken ? setMode('hardware') : setMode('auth')}
-        >
-          <Text style={styles.modeCardTitleHardware}>Hardware Link</Text>
-          <Text style={styles.modeCardDesc}>Register this phone as a Mobile Node. Athena will be able to access battery, vibrate the phone, and retrieve location.</Text>
-          {hasToken && (
-             <TouchableOpacity style={{ marginTop: 15 }} onPress={handleClearToken}>
-               <Text style={{ color: '#ff4444', fontSize: 12 }}>CLEAR SAVED CREDENTIALS</Text>
-             </TouchableOpacity>
-          )}
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
-  if (mode === 'auth') {
-    return (
-      <View style={styles.startupContainer}>
-        <StatusBar style="light" />
-        <Text style={styles.startupTitle}>AUTH REQUIRED</Text>
-        <Text style={styles.startupSubtitle}>Enter NODE_AUTH_TOKEN to register hardware</Text>
-        
-        <TextInput
-          style={[styles.textInput, { marginBottom: 20 }]}
-          placeholder="Auth Token"
-          placeholderTextColor="#4a5568"
-          secureTextEntry={true}
-          value={tokenInput}
-          onChangeText={setTokenInput}
-          autoCapitalize="none"
-        />
-        
-        <TouchableOpacity style={styles.sendButton} onPress={handleSetToken}>
-          <Text style={styles.sendButtonText}>SECURE LOGIN</Text>
-        </TouchableOpacity>
-        
-        <TouchableOpacity style={{ marginTop: 20 }} onPress={() => setMode('selecting')}>
-          <Text style={{ color: '#8892b0', textAlign: 'center' }}>Cancel</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
-  return <ChatScreen mode={mode} nodeId={nodeId} serverUrl={serverUrl} />;
+          <Text style={styles.footerHint}>
+            You only need to do this once. Contact your administrator for an invite code.
+          </Text>
+        </Animated.View>
+      </LinearGradient>
+    </TouchableWithoutFeedback>
+  );
 }
 
-function ChatScreen({ mode, nodeId, serverUrl }: { mode: 'ai' | 'hardware', nodeId: string, serverUrl: string }) {
+// ─────────────────────────────────────────
+// CHAT SCREEN
+// ─────────────────────────────────────────
+function ChatScreen({
+  deviceToken,
+  role,
+  nodeId,
+  serverUrl,
+  onLogout,
+}: {
+  deviceToken: string;
+  role: 'admin' | 'user';
+  nodeId: string;
+  serverUrl: string;
+  onLogout: () => void;
+}) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isConnected, setIsConnected] = useState(false);
   const [isWaiting, setIsWaiting] = useState(false);
+  const [mode, setMode] = useState<'ai' | 'hardware'>(role === 'admin' ? 'ai' : 'ai');
   const [selectedImage, setSelectedImage] = useState<{ uri: string, base64: string, mimeType: string } | null>(null);
-  
+  const [showModeMenu, setShowModeMenu] = useState(false);
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+
   const wsChatRef = useRef<WebSocket | null>(null);
   const wsNodeRef = useRef<WebSocket | null>(null);
   const scrollViewRef = useRef<ScrollView>(null);
   const activeMessageRef = useRef<Message | null>(null);
 
+  // Pulse animation for thinking indicator
+  useEffect(() => {
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 0.4, duration: 700, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 700, useNativeDriver: true }),
+      ])
+    );
+    if (isWaiting) pulse.start();
+    else { pulse.stop(); pulseAnim.setValue(1); }
+    return () => pulse.stop();
+  }, [isWaiting]);
+
   useEffect(() => {
     connectChatWebSocket();
-    if (mode === 'hardware') {
-      connectNodeWebSocket();
-    }
+    if (mode === 'hardware' && role === 'admin') connectNodeWebSocket();
     return () => {
       wsChatRef.current?.close();
       wsNodeRef.current?.close();
     };
-  }, []);
+  }, [mode]);
 
   let nodeReconnectDelay = 1000;
   const connectNodeWebSocket = async () => {
-    // Request location permissions upfront if we're in hardware mode
     await Location.requestForegroundPermissionsAsync();
-    const token = await SecureStore.getItemAsync('NODE_AUTH_TOKEN');
 
     const wsNode = new WebSocket(`${serverUrl}/nodes`);
     wsNode.onopen = () => {
-      console.log('Mobile Node connected');
       nodeReconnectDelay = 1000;
       wsNode.send(JSON.stringify({
         type: 'node_register',
         id: nodeId,
         name: Platform.OS + ' Phone',
         nodeType: 'mobile',
-        token,
+        token: deviceToken,
         capabilities: NODE_CAPABILITIES
       }));
     };
@@ -204,65 +320,53 @@ function ChatScreen({ mode, nodeId, serverUrl }: { mode: 'ai' | 'hardware', node
     wsNode.onmessage = async (event) => {
       try {
         const message = JSON.parse(event.data);
-          if (message.type === 'ping') {
-            wsNode.send(JSON.stringify({ type: 'pong' }));
-          } else if (message.type === 'execute_tool') {
-            console.log('Received hardware command:', message.toolName);
-            let result: any = null;
-
-            if (message.toolName === 'get_battery_level') {
-              const level = await Battery.getBatteryLevelAsync();
-              const state = await Battery.getBatteryStateAsync();
-              let stateStr = 'Unknown';
-              if (state === Battery.BatteryState.UNPLUGGED) stateStr = 'Unplugged (Running on battery)';
-              else if (state === Battery.BatteryState.CHARGING) stateStr = 'Charging';
-              else if (state === Battery.BatteryState.FULL) stateStr = 'Fully Charged';
-              result = `🔋 Battery Level: ${Math.round(level * 100)}%\n⚡ Status: ${stateStr}`;
-            } 
-            else if (message.toolName === 'vibrate_phone') {
-              const style = message.args?.style || 'medium';
-              if (style === 'heavy') await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-              else if (style === 'light') await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-              else if (style === 'success') await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-              else await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              result = `Phone vibrated with style: ${style}`;
+        if (message.type === 'ping') {
+          wsNode.send(JSON.stringify({ type: 'pong' }));
+        } else if (message.type === 'execute_tool') {
+          let result: any = null;
+          if (message.toolName === 'get_battery_level') {
+            const level = await Battery.getBatteryLevelAsync();
+            const state = await Battery.getBatteryStateAsync();
+            let stateStr = 'Unknown';
+            if (state === Battery.BatteryState.UNPLUGGED) stateStr = 'Running on battery';
+            else if (state === Battery.BatteryState.CHARGING) stateStr = 'Charging';
+            else if (state === Battery.BatteryState.FULL) stateStr = 'Fully Charged';
+            result = `🔋 Battery: ${Math.round(level * 100)}%\n⚡ ${stateStr}`;
+          } else if (message.toolName === 'vibrate_phone') {
+            const style = message.args?.style || 'medium';
+            if (style === 'heavy') await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+            else if (style === 'light') await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            else if (style === 'success') await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            else await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            result = `Phone vibrated with style: ${style}`;
+          } else if (message.toolName === 'get_location') {
+            let { status } = await Location.getForegroundPermissionsAsync();
+            if (status !== 'granted') {
+              result = 'Location permission denied.';
+            } else {
+              let loc = await Location.getCurrentPositionAsync({});
+              result = `Lat: ${loc.coords.latitude}, Lon: ${loc.coords.longitude}`;
             }
-            else if (message.toolName === 'get_location') {
-              let { status } = await Location.getForegroundPermissionsAsync();
-              if (status !== 'granted') {
-                result = 'Location permission denied by user.';
-              } else {
-                let location = await Location.getCurrentPositionAsync({});
-                result = `Lat: ${location.coords.latitude}, Lon: ${location.coords.longitude}`;
-              }
-            }
-            else {
-              result = `Unknown mobile tool: ${message.toolName}`;
-            }
-
-            wsNode.send(JSON.stringify({
-              type: 'tool_result',
-              callId: message.callId,
-              result: result
-            }));
+          } else {
+            result = `Unknown tool: ${message.toolName}`;
           }
-        } catch (err) {
-          console.error('Mobile Node error', err);
+          wsNode.send(JSON.stringify({ type: 'tool_result', callId: message.callId, result }));
         }
-      };
-
-      wsNode.onclose = () => {
-        console.log('Mobile Node disconnected. Reconnecting in', nodeReconnectDelay);
-        setTimeout(connectNodeWebSocket, nodeReconnectDelay);
-        nodeReconnectDelay = Math.min(nodeReconnectDelay * 2, 30000);
-      };
-
-      wsNodeRef.current = wsNode;
+      } catch (err) { console.error('Node WS error', err); }
     };
 
+    wsNode.onclose = () => {
+      setTimeout(connectNodeWebSocket, nodeReconnectDelay);
+      nodeReconnectDelay = Math.min(nodeReconnectDelay * 2, 30000);
+    };
+    wsNodeRef.current = wsNode;
+  };
+
   let chatReconnectDelay = 1000;
-  const connectChatWebSocket = () => {
-    const wsChat = new WebSocket(`${serverUrl}/chat`);
+  const connectChatWebSocket = useCallback(() => {
+    const wsUrl = `${serverUrl}/chat?token=${encodeURIComponent(deviceToken)}`;
+    const wsChat = new WebSocket(wsUrl);
+
     wsChat.onopen = () => {
       setIsConnected(true);
       chatReconnectDelay = 1000;
@@ -272,74 +376,63 @@ function ChatScreen({ mode, nodeId, serverUrl }: { mode: 'ai' | 'hardware', node
       try {
         const data = JSON.parse(event.data);
         setIsWaiting(false);
-
         if (data.type === 'token') {
           if (!activeMessageRef.current) {
-            const newMsg: Message = {
-              id: Date.now().toString(),
-              sender: 'athena',
-              text: data.text,
-              isStreaming: true,
-            };
+            const newMsg: Message = { id: Date.now().toString(), sender: 'athena', text: data.text, isStreaming: true };
             activeMessageRef.current = newMsg;
-            // Clear any executing tool bubbles when she starts talking
             setMessages((prev) => [...prev.filter(m => !m.toolAction), newMsg]);
           } else {
             activeMessageRef.current.text += data.text;
             setMessages((prev) => [...prev]);
           }
+          scrollViewRef.current?.scrollToEnd({ animated: false });
         } else if (data.type === 'tool') {
-          // Add a temporary system message indicating tool execution
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: Date.now().toString() + '-tool',
-              sender: 'athena',
-              text: `Executing: ${data.tool}...`,
-              toolAction: data.tool,
-            },
-          ]);
+          setMessages((prev) => [...prev, {
+            id: Date.now().toString() + '-tool',
+            sender: 'athena',
+            text: `⚙️  ${data.tool}`,
+            toolAction: data.tool,
+          }]);
         } else if (data.type === 'done') {
           if (activeMessageRef.current) {
             activeMessageRef.current.isStreaming = false;
             activeMessageRef.current = null;
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           }
-          // Also ensure tool bubbles are cleared if there was no text response
           setMessages((prev) => [...prev.filter(m => !m.toolAction)]);
+          setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
         }
-      } catch (err) {
-        console.error('Chat WS parse error', err);
-      }
+      } catch (err) { console.error('Chat WS parse error', err); }
     };
 
     wsChat.onclose = () => {
       setIsConnected(false);
       setIsWaiting(false);
-      setTimeout(connectChatWebSocket, 5000);
+      setTimeout(connectChatWebSocket, chatReconnectDelay);
+      chatReconnectDelay = Math.min(chatReconnectDelay * 2, 30000);
     };
 
     wsChatRef.current = wsChat;
-  };
+  }, [serverUrl, deviceToken]);
 
   const sendMessage = () => {
     if ((!inputText.trim() && !selectedImage) || !isConnected) return;
+
     const textMsg = inputText.trim() || 'Please analyze this image.';
-    const userMsg: Message = { id: Date.now().toString(), sender: 'user', text: textMsg + (selectedImage ? ' [Image attached]' : '') };
+    const userMsg: Message = { id: Date.now().toString(), sender: 'user', text: textMsg + (selectedImage ? ' 📎' : '') };
     setMessages((prev) => [...prev, userMsg]);
     setIsWaiting(true);
-    
+
     const payload: any = { type: 'text', text: textMsg };
-    if (selectedImage && selectedImage.base64) {
-      payload.attachments = [{
-        type: 'image',
-        mimeType: selectedImage.mimeType,
-        data: selectedImage.base64
-      }];
+    if (selectedImage?.base64) {
+      payload.attachments = [{ type: 'image', mimeType: selectedImage.mimeType, data: selectedImage.base64 }];
     }
-    
+
     wsChatRef.current?.send(JSON.stringify(payload));
     setInputText('');
     setSelectedImage(null);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
   };
 
   const handlePickImage = async () => {
@@ -349,14 +442,9 @@ function ChatScreen({ mode, nodeId, serverUrl }: { mode: 'ai' | 'hardware', node
       quality: 0.7,
       base64: true,
     });
-
-    if (!result.canceled && result.assets && result.assets.length > 0) {
+    if (!result.canceled && result.assets?.length > 0) {
       const asset = result.assets[0];
-      setSelectedImage({
-        uri: asset.uri,
-        base64: asset.base64 || '',
-        mimeType: asset.mimeType || 'image/jpeg'
-      });
+      setSelectedImage({ uri: asset.uri, base64: asset.base64 || '', mimeType: asset.mimeType || 'image/jpeg' });
     }
   };
 
@@ -364,331 +452,510 @@ function ChatScreen({ mode, nodeId, serverUrl }: { mode: 'ai' | 'hardware', node
     try {
       const update = await Updates.checkForUpdateAsync();
       if (update.isAvailable) {
-        Alert.alert(
-          'Update Available',
-          'A new version of Athena is available. Do you want to download and install it?',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Update',
-              onPress: async () => {
-                await Updates.fetchUpdateAsync();
-                await Updates.reloadAsync();
-              },
-            },
-          ]
-        );
+        Alert.alert('Update Available', 'Install the latest version?', [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Update', onPress: async () => { await Updates.fetchUpdateAsync(); await Updates.reloadAsync(); } },
+        ]);
       } else {
-        Alert.alert('Up to date', 'You are running the latest version of Athena.');
+        Alert.alert('Up to date', 'You are running the latest version.');
       }
-    } catch (e: any) {
-      Alert.alert('Update Error', e.message);
-    }
+    } catch (e: any) { Alert.alert('Update Error', e.message); }
+  };
+
+  const confirmLogout = () => {
+    Alert.alert('Log Out', 'This will remove your device registration. You will need a new invite code to log back in.', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Log Out', style: 'destructive', onPress: onLogout },
+    ]);
   };
 
   return (
-    <View style={styles.container}>
+    <LinearGradient colors={['#050d1a', '#0a1229', '#050d1a']} style={styles.container}>
       <StatusBar style="light" />
+
+      {/* HEADER */}
       <View style={styles.header}>
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+        <View>
           <Text style={styles.headerTitle}>A T H E N A</Text>
+          <Text style={styles.headerRole}>{role.toUpperCase()} · {mode === 'hardware' ? 'HARDWARE LINK' : 'AI CHAT'}</Text>
         </View>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <View style={styles.statusContainer}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <View style={[styles.statusPill, { borderColor: isConnected ? '#00e676' : '#ff1744' }]}>
             <View style={[styles.statusDot, { backgroundColor: isConnected ? '#00e676' : '#ff1744' }]} />
-            <Text style={styles.statusText}>{isConnected ? 'SYSTEM ONLINE' : 'OFFLINE'}</Text>
+            <Text style={[styles.statusText, { color: isConnected ? '#00e676' : '#ff1744' }]}>
+              {isConnected ? 'ONLINE' : 'OFFLINE'}
+            </Text>
           </View>
-          <TouchableOpacity onPress={handleCheckForUpdates} style={{ padding: 5, backgroundColor: '#1a1a2e', borderRadius: 20 }}>
-            <Text style={{ fontSize: 16 }}>🔄</Text>
+          {/* Mode switcher (admin only) */}
+          {role === 'admin' && (
+            <TouchableOpacity
+              style={styles.iconButton}
+              onPress={() => setShowModeMenu(!showModeMenu)}
+            >
+              <Text style={{ fontSize: 15 }}>⚙️</Text>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity style={styles.iconButton} onPress={handleCheckForUpdates}>
+            <Text style={{ fontSize: 15 }}>🔄</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.iconButton} onPress={confirmLogout}>
+            <Text style={{ fontSize: 14 }}>🔒</Text>
           </TouchableOpacity>
         </View>
       </View>
-      <KeyboardAvoidingView style={styles.chatContainer} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}>
-        <ScrollView ref={scrollViewRef} style={styles.messageList} contentContainerStyle={{ paddingBottom: 20 }} onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}>
-          {messages.length === 0 && (
-            <View style={styles.emptyState}>
-              <Text style={styles.emptyStateText}>Awaiting direct input...</Text>
-            </View>
-          )}
 
-          {messages.map((msg, idx) => {
-            const isUser = msg.sender === 'user';
-            const isTool = !!msg.toolAction;
-            return (
-              <View key={msg.id + idx} style={[styles.messageBubble, isUser ? styles.userBubble : isTool ? styles.toolBubble : styles.athenaBubble]}>
-                {isTool && <ActivityIndicator size="small" color="#00e5ff" style={{ marginRight: 8 }} />}
-                <Text style={[styles.messageText, isUser ? styles.userText : isTool ? styles.toolText : styles.athenaText]}>{msg.text}</Text>
-                {msg.isStreaming && <View style={styles.cursor} />}
+      {/* MODE MENU (Admin only) */}
+      {showModeMenu && role === 'admin' && (
+        <View style={styles.modeMenu}>
+          <TouchableOpacity
+            style={[styles.modeMenuItem, mode === 'ai' && styles.modeMenuItemActive]}
+            onPress={() => { setMode('ai'); setShowModeMenu(false); wsNodeRef.current?.close(); }}
+          >
+            <Text style={styles.modeMenuText}>💬  AI Chat</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.modeMenuItem, mode === 'hardware' && styles.modeMenuItemActive]}
+            onPress={() => { setMode('hardware'); setShowModeMenu(false); connectNodeWebSocket(); }}
+          >
+            <Text style={styles.modeMenuText}>🔌  Hardware Link</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* CHAT */}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+      >
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <ScrollView
+            ref={scrollViewRef}
+            style={styles.messageList}
+            contentContainerStyle={{ paddingBottom: 24, paddingTop: 8 }}
+            onContentSizeChange={() => scrollViewRef.current?.scrollToEnd({ animated: true })}
+            keyboardShouldPersistTaps="handled"
+          >
+            {messages.length === 0 && !isWaiting && (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyStateIcon}>✦</Text>
+                <Text style={styles.emptyStateText}>How can I assist you today?</Text>
               </View>
-            );
-          })}
-          
-          {isWaiting && (
-            <View style={[styles.messageBubble, styles.athenaBubble, { paddingVertical: 18 }]}>
-               <ActivityIndicator size="small" color="#00e5ff" />
-            </View>
-          )}
-        </ScrollView>
+            )}
 
-        <View style={styles.inputContainer}>
-          <TouchableOpacity style={styles.clearButton} onPress={() => setMessages([])}>
-            <Text style={styles.clearButtonText}>CLR</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={{ padding: 10, marginRight: 5, backgroundColor: selectedImage ? '#00e5ff22' : 'transparent', borderRadius: 20 }} onPress={handlePickImage}>
-            <Text style={{ fontSize: 20 }}>{selectedImage ? '🖼️' : '📎'}</Text>
-          </TouchableOpacity>
-          <TextInput
-            style={styles.textInput}
-            placeholder="Command override..."
-            placeholderTextColor="#4a5568"
-            value={inputText}
-            onChangeText={setInputText}
-            onSubmitEditing={sendMessage}
-            keyboardAppearance="dark"
-            multiline={true}
-            maxLength={1000}
-          />
-          <TouchableOpacity style={[styles.sendButton, (!inputText.trim() && !selectedImage) && styles.sendButtonDisabled]} onPress={sendMessage} disabled={!inputText.trim() && !selectedImage}>
-            <Text style={styles.sendButtonText}>SEND</Text>
+            {messages.map((msg, idx) => {
+              const isUser = msg.sender === 'user';
+              const isTool = !!msg.toolAction;
+              return (
+                <View key={msg.id + idx} style={[styles.msgRow, isUser && styles.msgRowUser]}>
+                  {!isUser && !isTool && (
+                    <View style={styles.avatarBadge}>
+                      <Text style={styles.avatarText}>A</Text>
+                    </View>
+                  )}
+                  <View style={[
+                    styles.bubble,
+                    isUser ? styles.userBubble : isTool ? styles.toolBubble : styles.athenaBubble,
+                    isTool && { flexDirection: 'row', alignItems: 'center', gap: 8 }
+                  ]}>
+                    {isTool && <ActivityIndicator size="small" color="#7dd3fc" />}
+                    <Text style={[
+                      styles.bubbleText,
+                      isUser ? styles.userText : isTool ? styles.toolText : styles.athenaText
+                    ]}>
+                      {msg.text}
+                    </Text>
+                    {msg.isStreaming && (
+                      <View style={styles.cursor} />
+                    )}
+                  </View>
+                </View>
+              );
+            })}
+
+            {/* Thinking indicator */}
+            {isWaiting && (
+              <View style={styles.msgRow}>
+                <View style={styles.avatarBadge}>
+                  <Text style={styles.avatarText}>A</Text>
+                </View>
+                <Animated.View style={[styles.bubble, styles.athenaBubble, styles.thinkingBubble, { opacity: pulseAnim }]}>
+                  <View style={styles.thinkingDots}>
+                    <View style={[styles.dot, { backgroundColor: '#7dd3fc' }]} />
+                    <View style={[styles.dot, { backgroundColor: '#7dd3fc', opacity: 0.6 }]} />
+                    <View style={[styles.dot, { backgroundColor: '#7dd3fc', opacity: 0.3 }]} />
+                  </View>
+                </Animated.View>
+              </View>
+            )}
+          </ScrollView>
+        </TouchableWithoutFeedback>
+
+        {/* Image preview */}
+        {selectedImage && (
+          <View style={styles.imagePreview}>
+            <Image source={{ uri: selectedImage.uri }} style={styles.previewImg} />
+            <TouchableOpacity style={styles.removePreview} onPress={() => setSelectedImage(null)}>
+              <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 12 }}>✕</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* INPUT BAR */}
+        <View style={styles.inputWrapper}>
+          <View style={styles.inputBar}>
+            <TouchableOpacity style={styles.attachBtn} onPress={handlePickImage}>
+              <Text style={{ fontSize: 18 }}>📎</Text>
+            </TouchableOpacity>
+            <TextInput
+              style={styles.textInput}
+              placeholder="Message Athena..."
+              placeholderTextColor="rgba(136,146,176,0.6)"
+              value={inputText}
+              onChangeText={setInputText}
+              onSubmitEditing={sendMessage}
+              keyboardAppearance="dark"
+              multiline
+              maxLength={1000}
+            />
+            <TouchableOpacity
+              style={[styles.sendBtn, (!inputText.trim() && !selectedImage) && styles.sendBtnDisabled]}
+              onPress={sendMessage}
+              disabled={!inputText.trim() && !selectedImage}
+            >
+              <Text style={styles.sendBtnIcon}>↑</Text>
+            </TouchableOpacity>
+          </View>
+          <TouchableOpacity onPress={() => setMessages([])} style={styles.clearBtn}>
+            <Text style={styles.clearBtnText}>Clear chat</Text>
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
-    </View>
+    </LinearGradient>
   );
 }
 
+// ─────────────────────────────────────────
+// STYLES
+// ─────────────────────────────────────────
 const styles = StyleSheet.create({
-  startupContainer: {
-    flex: 1,
-    backgroundColor: '#050505',
-    justifyContent: 'center',
-    padding: 20,
+  // Loading
+  loadingContainer: {
+    flex: 1, justifyContent: 'center', alignItems: 'center',
   },
-  startupTitle: {
+
+  // Register
+  registerContainer: {
+    flex: 1, justifyContent: 'center', padding: 24,
+  },
+  logoSection: {
+    alignItems: 'center', marginBottom: 36,
+  },
+  logoText: {
     color: '#00e5ff',
-    fontSize: 32,
+    fontSize: 30,
     fontWeight: '800',
-    letterSpacing: 6,
+    letterSpacing: 8,
     textAlign: 'center',
-    marginBottom: 10,
   },
-  startupSubtitle: {
-    color: '#8892b0',
-    fontSize: 16,
-    textAlign: 'center',
-    marginBottom: 40,
+  logoSubtitle: {
+    color: 'rgba(136,146,176,0.7)',
+    fontSize: 11,
+    letterSpacing: 4,
+    marginTop: 8,
+  },
+  logoDivider: {
+    width: 40, height: 1, backgroundColor: 'rgba(0,229,255,0.3)', marginTop: 20,
+  },
+  registerCard: {
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    padding: 24,
+  },
+  inputLabel: {
+    color: 'rgba(136,146,176,0.8)',
+    fontSize: 10,
     letterSpacing: 2,
-  },
-  modeCard: {
-    backgroundColor: '#111',
-    borderWidth: 1,
-    borderColor: '#333',
-    borderRadius: 12,
-    padding: 24,
-    marginBottom: 20,
-  },
-  modeCardTitle: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '700',
     marginBottom: 8,
+    fontWeight: '600',
   },
-  modeCardHardware: {
-    backgroundColor: '#0a1929',
-    borderWidth: 1,
-    borderColor: '#00e5ff',
+  glassInput: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderRadius: 12,
-    padding: 24,
-    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    color: '#e2e8f0',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 15,
+  },
+  codeInput: {
+    minHeight: 80,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontSize: 11,
+    lineHeight: 18,
+  },
+  primaryButton: {
+    backgroundColor: '#00e5ff',
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginTop: 28,
     shadowColor: '#00e5ff',
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
   },
-  modeCardTitleHardware: {
-    color: '#00e5ff',
-    fontSize: 20,
-    fontWeight: '700',
-    marginBottom: 8,
+  primaryButtonDisabled: {
+    backgroundColor: '#1a3644', shadowOpacity: 0,
   },
-  modeCardDesc: {
-    color: '#8892b0',
-    fontSize: 14,
-    lineHeight: 20,
+  primaryButtonText: {
+    color: '#000', fontWeight: '800', fontSize: 13, letterSpacing: 2,
   },
-  container: {
-    flex: 1,
-    backgroundColor: '#050505',
+  footerHint: {
+    color: 'rgba(136,146,176,0.4)',
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 24,
+    lineHeight: 18,
   },
+
+  // Chat container
+  container: { flex: 1 },
   header: {
-    paddingTop: Platform.OS === 'ios' ? 60 : 40,
-    paddingBottom: 15,
+    paddingTop: Platform.OS === 'ios' ? 58 : 38,
+    paddingBottom: 14,
     paddingHorizontal: 20,
-    backgroundColor: 'rgba(10, 10, 12, 0.95)',
-    borderBottomWidth: 1,
-    borderBottomColor: '#1a1a2e',
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    zIndex: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: 'rgba(5,13,26,0.8)',
   },
   headerTitle: {
     color: '#00e5ff',
-    fontSize: 22,
+    fontSize: 18,
     fontWeight: '800',
     letterSpacing: 4,
   },
-  statusContainer: {
+  headerRole: {
+    color: 'rgba(136,146,176,0.6)',
+    fontSize: 10,
+    letterSpacing: 2,
+    marginTop: 2,
+  },
+  statusPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#111',
     paddingHorizontal: 10,
     paddingVertical: 5,
-    borderRadius: 12,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: '#222',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    gap: 6,
   },
   statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 6,
+    width: 6, height: 6, borderRadius: 3,
   },
   statusText: {
-    color: '#8892b0',
-    fontSize: 10,
-    fontWeight: '600',
-    letterSpacing: 1,
+    fontSize: 9, fontWeight: '700', letterSpacing: 1,
   },
-  chatContainer: {
-    flex: 1,
-  },
-  messageList: {
-    flex: 1,
-    padding: 15,
-  },
-  emptyState: {
-    flex: 1,
+  iconButton: {
+    width: 34, height: 34,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 17,
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 100,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+
+  // Mode menu
+  modeMenu: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 120 : 100,
+    right: 16,
+    backgroundColor: 'rgba(10,18,41,0.96)',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(0,229,255,0.2)',
+    zIndex: 100,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  modeMenuItem: {
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.05)',
+  },
+  modeMenuItemActive: {
+    backgroundColor: 'rgba(0,229,255,0.08)',
+  },
+  modeMenuText: {
+    color: '#e2e8f0',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+
+  // Messages
+  messageList: { flex: 1, paddingHorizontal: 16 },
+  emptyState: {
+    marginTop: 100, alignItems: 'center', gap: 12,
+  },
+  emptyStateIcon: {
+    fontSize: 28, color: 'rgba(0,229,255,0.3)',
   },
   emptyStateText: {
-    color: '#334155',
-    fontSize: 14,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    letterSpacing: 2,
+    color: 'rgba(136,146,176,0.5)',
+    fontSize: 15,
+    textAlign: 'center',
+    lineHeight: 22,
   },
-  messageBubble: {
-    maxWidth: '85%',
-    padding: 16,
-    borderRadius: 16,
-    marginBottom: 16,
+  msgRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
+    marginBottom: 14,
+    gap: 10,
   },
-  userBubble: {
-    alignSelf: 'flex-end',
-    backgroundColor: '#1e1e2e',
-    borderBottomRightRadius: 4,
+  msgRowUser: {
+    flexDirection: 'row-reverse',
+  },
+  avatarBadge: {
+    width: 30, height: 30, borderRadius: 15,
+    backgroundColor: 'rgba(0,229,255,0.12)',
     borderWidth: 1,
-    borderColor: '#2a2a3c',
+    borderColor: 'rgba(0,229,255,0.3)',
+    justifyContent: 'center', alignItems: 'center',
+    marginBottom: 2,
+  },
+  avatarText: {
+    color: '#00e5ff', fontSize: 12, fontWeight: '800',
+  },
+  bubble: {
+    maxWidth: SCREEN_WIDTH * 0.75,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 18,
   },
   athenaBubble: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#0a1929',
-    borderBottomLeftRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderTopLeftRadius: 4,
     borderWidth: 1,
-    borderColor: 'rgba(0, 229, 255, 0.2)',
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  userBubble: {
+    backgroundColor: 'rgba(0,229,255,0.12)',
+    borderTopRightRadius: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(0,229,255,0.2)',
   },
   toolBubble: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#111827',
-    borderBottomLeftRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.03)',
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: 'rgba(255,255,255,0.06)',
     paddingVertical: 10,
   },
-  messageText: {
-    fontSize: 16,
-    lineHeight: 24,
-  },
-  userText: {
-    color: '#e2e8f0',
-  },
-  athenaText: {
-    color: '#a5f3fc',
-  },
-  toolText: {
-    color: '#9ca3af',
-    fontSize: 13,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-  },
-  cursor: {
-    width: 8,
-    height: 16,
-    backgroundColor: '#00e5ff',
-    marginLeft: 4,
-    marginTop: 4,
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    padding: 15,
-    paddingBottom: Platform.OS === 'ios' ? 30 : 15,
-    backgroundColor: '#0a0a0f',
-    borderTopWidth: 1,
-    borderTopColor: '#1a1a2e',
-    alignItems: 'flex-end',
-  },
-  clearButton: {
-    backgroundColor: '#1a1a24',
-    borderRadius: 12,
-    paddingHorizontal: 16,
+  thinkingBubble: {
     paddingVertical: 14,
-    marginRight: 10,
-    borderWidth: 1,
-    borderColor: '#2a2a3c',
-    justifyContent: 'center',
+    paddingHorizontal: 20,
   },
-  clearButtonText: {
-    color: '#ff4444',
-    fontWeight: '700',
-    fontSize: 12,
-    letterSpacing: 1,
+  bubbleText: {
+    fontSize: 15,
+    lineHeight: 22,
+  },
+  athenaText: { color: '#e2e8f0' },
+  userText: { color: '#a5f3fc' },
+  toolText: { color: 'rgba(136,146,176,0.7)', fontSize: 13, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  cursor: {
+    width: 2, height: 16,
+    backgroundColor: '#00e5ff',
+    marginLeft: 3,
+    marginTop: 3,
+    borderRadius: 1,
+  },
+  thinkingDots: {
+    flexDirection: 'row', gap: 6, alignItems: 'center',
+  },
+  dot: {
+    width: 7, height: 7, borderRadius: 4,
+  },
+
+  // Input
+  inputWrapper: {
+    paddingHorizontal: 16,
+    paddingBottom: Platform.OS === 'ios' ? 32 : 16,
+    paddingTop: 8,
+    gap: 6,
+  },
+  inputBar: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 6,
+    paddingVertical: 6,
+    gap: 6,
+  },
+  attachBtn: {
+    width: 38, height: 38,
+    justifyContent: 'center', alignItems: 'center',
   },
   textInput: {
     flex: 1,
-    backgroundColor: '#111118',
-    color: '#fff',
-    borderRadius: 20,
-    paddingHorizontal: 20,
-    paddingTop: 14,
-    paddingBottom: 14,
-    fontSize: 16,
-    maxHeight: 120,
-    borderWidth: 1,
-    borderColor: '#222',
+    color: '#e2e8f0',
+    fontSize: 15,
+    lineHeight: 22,
+    maxHeight: 110,
+    paddingTop: 8,
+    paddingBottom: 8,
   },
-  sendButton: {
-    marginLeft: 10,
+  sendBtn: {
+    width: 38, height: 38,
     backgroundColor: '#00e5ff',
-    borderRadius: 20,
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    justifyContent: 'center',
+    borderRadius: 19,
+    justifyContent: 'center', alignItems: 'center',
     shadowColor: '#00e5ff',
     shadowOpacity: 0.3,
     shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
+    shadowOffset: { width: 0, height: 2 },
   },
-  sendButtonDisabled: {
-    backgroundColor: '#1a3644',
+  sendBtnDisabled: {
+    backgroundColor: 'rgba(0,229,255,0.15)',
     shadowOpacity: 0,
   },
-  sendButtonText: {
-    color: '#000',
-    fontWeight: '800',
-    fontSize: 14,
-    letterSpacing: 1,
+  sendBtnIcon: {
+    color: '#000', fontSize: 18, fontWeight: '800',
+  },
+  clearBtn: {
+    alignItems: 'center', paddingVertical: 4,
+  },
+  clearBtnText: {
+    color: 'rgba(136,146,176,0.35)',
+    fontSize: 12,
+  },
+
+  // Image preview
+  imagePreview: {
+    marginHorizontal: 16, marginBottom: 8,
+    position: 'relative', alignSelf: 'flex-start',
+  },
+  previewImg: {
+    width: 80, height: 80, borderRadius: 12,
+    borderWidth: 1, borderColor: 'rgba(0,229,255,0.3)',
+  },
+  removePreview: {
+    position: 'absolute', top: -8, right: -8,
+    width: 22, height: 22, borderRadius: 11,
+    backgroundColor: '#ff1744',
+    justifyContent: 'center', alignItems: 'center',
   },
 });

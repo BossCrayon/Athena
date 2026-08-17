@@ -70,7 +70,7 @@ export class AthenaCore {
         });
     }
 
-    async chat(userInput: string, attachments?: MessageContentPart[], onToken?: (text: string) => void, onToolCall?: (toolName: string) => void): Promise<string> {
+    async chat(userInput: string, attachments?: MessageContentPart[], onToken?: (text: string) => void, onToolCall?: (toolName: string) => void, role: string = 'admin'): Promise<string> {
         const userMsg: Message = {
             role: 'user',
             content: attachments && attachments.length > 0 ? [{ type: 'text', text: userInput }, ...attachments] : userInput,
@@ -82,7 +82,7 @@ export class AthenaCore {
 
 
         try {
-            const finalResponseText = await this.taskEngine.executeInteractive(userInput, executionHistory, onToken, onToolCall);
+            const finalResponseText = await this.taskEngine.executeInteractive(userInput, executionHistory, onToken, onToolCall, role);
             
             const modelMsg: Message = {
                 role: 'model',

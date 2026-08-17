@@ -2,6 +2,8 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import websocket from '@fastify/websocket';
 import * as dotenv from 'dotenv';
+import * as crypto from 'crypto';
+import { createClient } from '@supabase/supabase-js';
 import { AthenaCore } from '../core/athena.js';
 import { LLMRouter } from '../llm/router.js';
 import { GeminiProvider } from '../llm/providers/gemini.js';
@@ -258,7 +260,79 @@ fastify.register(async function (app) {
         });
     });
 
-    app.get('/chat', { websocket: true }, (connection: any, req) => {
+    const supabase = createClient(
+        process.env.SUPABASE_URL || '',
+        process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || ''
+    );
+
+    // Device Registration Endpoint
+    app.post('/auth/register', async (req, res) => {
+        try {
+            const body = req.body as { hash: string, name: string };
+            if (!body || !body.hash || !body.name) {
+                return res.status(400).send({ error: 'Missing hash or name' });
+            }
+
+            // Verify hash
+            const { data: invite, error: inviteError } = await supabase
+                .from('auth_invites')
+                .select('*')
+                .eq('hash', body.hash)
+                .single();
+
+            if (inviteError || !invite) {
+                return res.status(401).send({ error: 'Invalid or expired invite code' });
+            }
+
+            // Burn the hash
+            await supabase.from('auth_invites').delete().eq('hash', body.hash);
+
+            // Create persistent device token
+            const deviceToken = crypto.randomBytes(32).toString('hex');
+            
+            // Register device
+            const { error: deviceError } = await supabase
+                .from('auth_devices')
+                .insert({
+                    token: deviceToken,
+                    name: body.name,
+                    role: invite.role
+                });
+
+            if (deviceError) {
+                return res.status(500).send({ error: 'Failed to register device' });
+            }
+
+            return res.send({ token: deviceToken, role: invite.role });
+        } catch (e: any) {
+            return res.status(500).send({ error: e.message });
+        }
+    });
+
+    app.get('/chat', { websocket: true }, async (connection: any, req: any) => {
+        // Authenticate connection
+        const token = req.query.token;
+        if (!token) {
+            connection.send(JSON.stringify({ type: 'token', text: 'Error: Missing device token. Please authenticate.' }));
+            connection.close();
+            return;
+        }
+
+        const { data: device, error } = await supabase
+            .from('auth_devices')
+            .select('*')
+            .eq('token', token)
+            .single();
+
+        if (error || !device) {
+            connection.send(JSON.stringify({ type: 'token', text: 'Error: Invalid device token.' }));
+            connection.close();
+            return;
+        }
+
+        // Update last seen
+        supabase.from('auth_devices').update({ last_seen_at: new Date().toISOString() }).eq('token', token).then();
+
         connection.on('message', async (message: string) => {
             try {
                 const data = JSON.parse(message);
@@ -271,6 +345,7 @@ fastify.register(async function (app) {
                     }
 
                     // Start streaming response
+                    // Pass the user's role to the chat engine to enforce RBAC
                     await athena.chat(
                         data.text,
                         data.attachments,
@@ -279,7 +354,8 @@ fastify.register(async function (app) {
                         },
                         (toolName) => {
                             connection.send(JSON.stringify({ type: 'tool', tool: toolName }));
-                        }
+                        },
+                        device.role // Pass role to restrict tools
                     );
                     connection.send(JSON.stringify({ type: 'done' }));
                 }

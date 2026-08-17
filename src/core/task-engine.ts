@@ -5,6 +5,7 @@ import type { ToolRegistry } from '../tools/registry.js';
 import type { ToolOrchestrator } from '../tools/orchestrator.js';
 import type { ToolContext } from '../tools/types.js';
 import type { Message, ToolResult, GenerationOptions } from '../llm/types.js';
+import type { ToolSchema } from '../tools/schema.js';
 import type { Task, TaskStep, TaskPlan, TaskSubgoal } from './task.js';
 import type { TaskStore } from './task-store.js';
 import type { EventBus } from './events.js';
@@ -64,8 +65,22 @@ export class TaskEngine {
         userInput: string,
         history: Message[],
         onToken?: (text: string) => void,
-        onToolCall?: (toolName: string) => void
+        onToolCall?: (toolName: string) => void,
+        role: string = 'admin'
     ): Promise<string> {
+        // RBAC: define tools that only admins can use (hardware/laptop control)
+        const ADMIN_ONLY_TOOLS = new Set([
+            'run_command', 'system_control', 'system_info',
+            'list_directory', 'read_file', 'search_files',
+            'locate_item', 'capture_screenshot'
+        ]);
+
+        // If user role, inject a restriction into history context
+        const effectiveHistory = role === 'user'
+            ? [
+                ...history,
+            ]
+            : history;
         let isTask = true;
         const trimmed = userInput.trim();
         
@@ -86,6 +101,11 @@ export class TaskEngine {
         }
 
         // Fast path: skip planning for simple conversational messages
+        // Filter schemas based on role - users cannot see admin-only tool definitions
+        const allowedSchemas = role === 'user'
+            ? this.toolRegistry.getSchemas().filter(s => !ADMIN_ONLY_TOOLS.has(s.name))
+            : this.toolRegistry.getSchemas();
+
         if (!isTask) {
             const fastOptions: GenerationOptions = {
                 temperature: 0.7,
@@ -93,7 +113,7 @@ export class TaskEngine {
                 routing: { priority: 'latency', intent: { fastResponse: true } }
             };
             try {
-                const response = await this.router.generate(history, fastOptions, this.toolRegistry.getSchemas());
+                const response = await this.router.generate(effectiveHistory, fastOptions, allowedSchemas);
                 // If the model decided to call a tool anyway, fall through to full task execution
                 if (!response.toolCalls || response.toolCalls.length === 0) {
                     return response.text || '';
@@ -126,7 +146,20 @@ export class TaskEngine {
             routing: { priority: 'latency', requireTools: true }
         };
 
-        return await this.executeInternal(task, history, this.defaultToolContext, routingOptions, onToolCall);
+        // Create a tool context that blocks admin-only tools for user role
+        const toolContext = role === 'user'
+            ? {
+                ...this.defaultToolContext,
+                askPermission: async (toolName: string, args: Record<string, unknown>) => {
+                    if (ADMIN_ONLY_TOOLS.has(toolName)) {
+                        return false; // Silently deny
+                    }
+                    return this.defaultToolContext.askPermission?.(toolName, args) ?? true;
+                }
+            }
+            : this.defaultToolContext;
+
+        return await this.executeInternal(task, effectiveHistory, toolContext, routingOptions, onToolCall, allowedSchemas);
     }
 
     async executeBackground(
@@ -215,8 +248,10 @@ export class TaskEngine {
         history: Message[],
         context: ToolContext,
         routingOptions: GenerationOptions,
-        onToolCall?: (toolName: string) => void
+        onToolCall?: (toolName: string) => void,
+        allowedSchemas?: ToolSchema[]
     ): Promise<string> {
+        const toolSchemas = allowedSchemas ?? this.toolRegistry.getSchemas();
         if (!task.telemetry) {
             task.telemetry = {
                 startTime: Date.now(),
@@ -360,7 +395,7 @@ export class TaskEngine {
                     });
                 }
 
-                const p = this.executeSubgoal(task, sg, history, context, routingOptions, onToolCall).then(async result => {
+                const p = this.executeSubgoal(task, sg, history, context, routingOptions, onToolCall, toolSchemas).then(async result => {
                     if (result.success) {
                         sg.status = 'completed';
                         if (this.eventBus) {
@@ -444,8 +479,10 @@ export class TaskEngine {
         history: Message[],
         context: ToolContext,
         baseOptions: GenerationOptions,
-        onToolCall?: (toolName: string) => void
+        onToolCall?: (toolName: string) => void,
+        toolSchemas?: ToolSchema[]
     ): Promise<{ success: boolean, errorObservation?: string }> {
+        const schemas = toolSchemas ?? this.toolRegistry.getSchemas();
         let iterations = 0;
 
         const intent = { ...(baseOptions.routing?.intent || {}), ...(subgoal.requirements || {}) };
@@ -465,7 +502,7 @@ export class TaskEngine {
         ];
 
         let genStart = Date.now();
-        let response = await this.router.generate(subgoalHistory, routingOptions, this.toolRegistry.getSchemas());
+        let response = await this.router.generate(subgoalHistory, routingOptions, schemas);
         task.telemetry!.llmGenerationMs! += (Date.now() - genStart);
 
         while (response.toolCalls && response.toolCalls.length > 0) {
@@ -642,7 +679,7 @@ export class TaskEngine {
                 results,
                 subgoalHistory,
                 routingOptions,
-                this.toolRegistry.getSchemas()
+                this.toolRegistry.getSchemas() // fallback full schema for tool result continuation
             );
             task.telemetry!.llmGenerationMs! += (Date.now() - genStart);
         }

@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "chat": "tsx src/cli/index.ts",
+    "invite": "tsx src/scripts/invite.ts",
     "server": "tsx src/server/index.ts",
     "node": "tsx src/node/index.ts"
   },
