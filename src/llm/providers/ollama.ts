@@ -43,10 +43,15 @@ export class OllamaProvider implements LLMProvider {
 
         const requestBody = {
             model: this.model,
-            messages: messages.map(m => ({
-                role: m.role,
-                content: m.content,
-            })),
+            messages: messages.map(m => {
+                const contentString = typeof m.content === 'string' 
+                    ? m.content 
+                    : m.content.map(p => p.type === 'text' ? p.text : '[Unsupported Image Data]').join('\n');
+                return {
+                    role: m.role,
+                    content: contentString,
+                };
+            }),
             stream: true,
             options: {
                 temperature: options?.temperature ?? 0.7,

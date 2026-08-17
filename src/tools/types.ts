@@ -9,11 +9,17 @@ export interface ToolDefinition {
     name: string;
     description: string;
     permission: ToolPermission;
+    isParallelizable?: boolean;
 }
+
+import type { Task, TaskStep } from '../core/task.js';
 
 export interface ToolContext {
     cwd: string;
     askPermission?: (toolName: string, args: Record<string, unknown>) => Promise<boolean>;
+    signal?: AbortSignal;
+    task?: Task;
+    step?: TaskStep;
 }
 
 export interface ToolResult {
@@ -36,4 +42,5 @@ export interface ToolDefinition {
     description: string;
     permission: ToolPermission;
     schema: ToolSchema;
+    isParallelizable?: boolean;
 }

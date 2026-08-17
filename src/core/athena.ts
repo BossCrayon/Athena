@@ -2,8 +2,7 @@ import { LLMRouter } from '../llm/router.js';
 
 import type {
     Message,
-    ToolCall,
-    ToolResult,
+    MessageContentPart
 } from '../llm/types.js';
 
 import { ATHENA_SYSTEM_PROMPT } from '../personality/athena.js';
@@ -14,6 +13,11 @@ import { ToolOrchestrator } from '../tools/orchestrator.js';
 import type { ToolContext } from '../tools/types.js';
 
 import { CloudMemoryManager } from './memory.js';
+import { TaskEngine } from './task-engine.js';
+import { Planner } from './planner.js';
+import type { ContextBuilder } from './context-builder.js';
+import type { TaskStore } from './task-store.js';
+import type { EventBus } from './events.js';
 
 export class AthenaCore {
     private readonly router: LLMRouter;
@@ -23,19 +27,31 @@ export class AthenaCore {
     private readonly toolOrchestrator: ToolOrchestrator;
     private readonly toolContext: ToolContext;
     private readonly memoryManager: CloudMemoryManager;
+    private readonly contextBuilder: ContextBuilder;
+    private readonly taskStore?: TaskStore;
+    private readonly eventBus?: EventBus;
+    private readonly taskEngine: TaskEngine;
 
     constructor(
         router: LLMRouter,
         toolRegistry: ToolRegistry,
         toolOrchestrator: ToolOrchestrator,
         toolContext: ToolContext,
-        memoryManager: CloudMemoryManager
+        memoryManager: CloudMemoryManager,
+        contextBuilder: ContextBuilder,
+        taskStore?: TaskStore,
+        eventBus?: EventBus
     ) {
         this.router = router;
         this.toolRegistry = toolRegistry;
         this.toolOrchestrator = toolOrchestrator;
         this.toolContext = toolContext;
         this.memoryManager = memoryManager;
+        this.contextBuilder = contextBuilder;
+        this.taskStore = taskStore;
+        this.eventBus = eventBus;
+        const planner = new Planner(router, contextBuilder, taskStore);
+        this.taskEngine = new TaskEngine(router, toolRegistry, toolOrchestrator, toolContext, planner, taskStore, eventBus);
 
         this.history = [];
     }
@@ -53,56 +69,33 @@ export class AthenaCore {
         });
     }
 
-    async chat(userInput: string, onToken?: (text: string) => void, onToolCall?: (toolName: string) => void): Promise<string> {
+    async chat(userInput: string, attachments?: MessageContentPart[], onToken?: (text: string) => void, onToolCall?: (toolName: string) => void): Promise<string> {
         const userMsg: Message = {
             role: 'user',
-            content: userInput,
+            content: attachments && attachments.length > 0 ? [{ type: 'text', text: userInput }, ...attachments] : userInput,
         };
         this.history.push(userMsg);
         await this.memoryManager.syncMessage(userMsg);
 
+        const executionHistory = [...this.history];
+
+
         try {
-            const routing = {
-                priority: 'latency' as const, // For standard user interactions, prioritize fast responses
-                requireTools: true, // We want the ability to use tools by default
+            const finalResponseText = await this.taskEngine.executeInteractive(userInput, executionHistory, onToken, onToolCall);
+            
+            const modelMsg: Message = {
+                role: 'model',
+                content: finalResponseText,
             };
+            this.history.push(modelMsg);
+            await this.memoryManager.syncMessage(modelMsg);
 
-            const response = await this.router.generate(
-                this.history,
-                {
-                    temperature: 0.7,
-                    onToken,
-                    routing,
-                },
-                this.toolRegistry.getSchemas()
-            );
-
-            if (
-                response.toolCalls &&
-                response.toolCalls.length > 0 &&
-                response.continuationId
-            ) {
-                return await this.handleToolCalls(
-                    response.toolCalls,
-                    response.continuationId,
-                    onToken,
-                    onToolCall
-                );
-            } else {
-                const modelMsg: Message = {
-                    role: 'model',
-                    content: response.text,
-                };
-                this.history.push(modelMsg);
-                await this.memoryManager.syncMessage(modelMsg);
-
-                return response.text;
-            }
+            return finalResponseText;
         } catch (error) {
             this.history.pop();
 
             console.error(
-                '[ATHENA] LLM request failed:',
+                '[ATHENA] Task Engine failed:',
                 error
             );
 
@@ -110,90 +103,8 @@ export class AthenaCore {
         }
     }
 
-    private async handleToolCalls(
-        toolCalls: ToolCall[],
-        continuationId: string,
-        onToken?: (text: string) => void,
-        onToolCall?: (toolName: string) => void
-    ): Promise<string> {
-        const results: ToolResult[] = [];
-
-        for (const toolCall of toolCalls) {
-            if (onToolCall) {
-                onToolCall(toolCall.name);
-            }
-            const result =
-                await this.toolOrchestrator.handle(
-                    {
-                        toolName: toolCall.name,
-                        arguments: toolCall.arguments,
-                    },
-                    this.toolContext
-                );
-
-            results.push({
-                toolCallId: toolCall.id,
-                toolName: result.toolName,
-                success: result.success,
-                output: result.output,
-                ...(result.error !== undefined
-                    ? {
-                        error: result.error,
-                    }
-                    : {}),
-            });
-        }
-
-        const response =
-            await this.router.continueWithToolResults(
-                continuationId,
-                results,
-                this.history,
-                { 
-                    temperature: 0.7, 
-                    onToken,
-                    routing: {
-                        priority: 'latency',
-                        requireTools: true,
-                    }
-                },
-                this.toolRegistry.getSchemas()
-            );
-
-        /*
-         * Gemini may request another tool after receiving
-         * the previous tool results.
-         *
-         * Continue until Gemini produces a normal response.
-         */
-        if (
-            response.toolCalls &&
-            response.toolCalls.length > 0 &&
-            response.continuationId
-        ) {
-            return await this.handleToolCalls(
-                response.toolCalls,
-                response.continuationId,
-                onToken,
-                onToolCall
-            );
-        }
-        let finalResponseText = response.text;
-        
-        if (!finalResponseText) {
-            const rawOutput = results.map(r => r.output || r.error).join('\n\n');
-            finalResponseText = `Here is the result of the operation:\n\n${rawOutput}`;
-            onToken?.(finalResponseText);
-        }
-
-        const finalModelMsg: Message = {
-            role: 'model',
-            content: finalResponseText,
-        };
-        this.history.push(finalModelMsg);
-        await this.memoryManager.syncMessage(finalModelMsg);
-
-        return finalResponseText;
+    getTaskEngine(): TaskEngine {
+        return this.taskEngine;
     }
 
     getConversationHistory(): readonly Message[] {

@@ -3,17 +3,29 @@ import type {
     LLMProvider,
     Message,
     ToolResult,
+    ProviderHealth,
+    LLMResponse,
 } from './types.js';
 
 import type { ToolSchema } from '../tools/schema.js';
+import type { EventBus } from '../core/events.js';
+import { classifyError } from '../core/telemetry.js';
 
 export class LLMRouter {
     private readonly providers = new Map<string, LLMProvider>();
+    private readonly healthState = new Map<string, ProviderHealth>();
     private defaultProviderName?: string;
     private fallbackProviders: string[] = [];
 
+    constructor(private readonly eventBus?: EventBus) {}
+
     registerProvider(name: string, provider: LLMProvider): void {
         this.providers.set(name, provider);
+        this.healthState.set(name, {
+            status: 'healthy',
+            failures: 0,
+            successes: 0,
+        });
     }
 
     setDefaultProvider(name: string): void {
@@ -27,34 +39,131 @@ export class LLMRouter {
         this.fallbackProviders = names;
     }
 
-    private getProvider(name?: string): LLMProvider {
-        const providerName = name ?? this.defaultProviderName;
-        if (!providerName) {
-            throw new Error('No provider specified and no default provider is set.');
+    getProviderHealth(name: string): ProviderHealth | undefined {
+        return this.healthState.get(name);
+    }
+
+    private handleProviderSuccess(providerName: string) {
+        const state = this.healthState.get(providerName);
+        if (!state) return;
+        state.successes += 1;
+        state.failures = 0;
+        state.status = 'healthy';
+        state.cooldownUntil = undefined;
+    }
+
+    private handleProviderFailure(providerName: string, error: any) {
+        const state = this.healthState.get(providerName);
+        if (!state) return;
+
+        state.failures += 1;
+        
+        const errStr = String(error?.message || error).toLowerCase();
+        const status = error?.status || error?.statusCode;
+
+        // Detect rate limit
+        const isRateLimit = status === 429 || errStr.includes('429') || errStr.includes('quota') || errStr.includes('rate limit') || errStr.includes('retry in');
+
+        if (isRateLimit) {
+            state.status = 'rate-limited';
+            
+            // Try to extract Retry-After or specific text "Please retry in X.Xs"
+            let cooldownSeconds = 60; // Default 60s
+            
+            const retryMatch = errStr.match(/retry in ([\d\.]+)s/);
+            if (retryMatch && retryMatch[1]) {
+                cooldownSeconds = Math.ceil(parseFloat(retryMatch[1]));
+            } else if (error?.headers?.['retry-after']) {
+                const retryAfter = parseInt(error.headers['retry-after'], 10);
+                if (!isNaN(retryAfter)) {
+                    cooldownSeconds = retryAfter;
+                }
+            }
+            
+            // Limit the cooldown to max 5 minutes to prevent infinite hangs
+            cooldownSeconds = Math.min(cooldownSeconds, 300);
+            
+            state.cooldownUntil = Date.now() + cooldownSeconds * 1000;
+            if (this.eventBus) {
+                this.eventBus.emit('telemetry', {
+                    eventType: 'provider_rate_limited',
+                    timestamp: new Date().toISOString(),
+                    provider: providerName,
+                    errorCategory: 'provider_rate_limited'
+                });
+            }
+        } else {
+            // Standard error
+            if (state.failures >= 3) {
+                state.status = 'error';
+                state.cooldownUntil = Date.now() + 30 * 1000; // 30s cooldown for general repeated errors
+            }
+            if (this.eventBus) {
+                this.eventBus.emit('telemetry', {
+                    eventType: 'provider_failed',
+                    timestamp: new Date().toISOString(),
+                    provider: providerName,
+                    errorCategory: classifyError(error)
+                });
+            }
         }
-        const provider = this.providers.get(providerName);
-        if (!provider) {
-            throw new Error(`Provider '${providerName}' is not registered.`);
-        }
-        return provider;
     }
 
     private getOptimalProviders(options?: GenerationOptions, tools?: ToolSchema[]): string[] {
+        const now = Date.now();
+        // check and recover providers
+        for (const [name, state] of this.healthState.entries()) {
+            if ((state.status === 'rate-limited' || state.status === 'error' || state.status === 'offline') && state.cooldownUntil && state.cooldownUntil <= now) {
+                state.status = 'healthy';
+                state.cooldownUntil = undefined;
+                if (this.eventBus) {
+                    this.eventBus.emit('telemetry', {
+                        eventType: 'provider_recovered',
+                        timestamp: new Date().toISOString(),
+                        provider: name
+                    });
+                }
+            }
+        }
+
+        let candidates = Array.from(this.providers.entries())
+            .map(([name, provider]) => ({ name, metadata: provider.getMetadata() }));
+
+        // Filter by health FIRST
+        candidates = candidates.filter(({ name }) => {
+            const state = this.healthState.get(name);
+            return state && state.status === 'healthy';
+        });
+
         if (options?.provider) {
-            return [...new Set([options.provider, ...this.fallbackProviders])].filter((p): p is string => Boolean(p));
+            const requestedHealthy = candidates.find(c => c.name === options.provider);
+            const fallbackHealthy = this.fallbackProviders.filter(p => {
+                const state = this.healthState.get(p);
+                return state && state.status === 'healthy';
+            });
+            
+            const list = requestedHealthy ? [options.provider, ...fallbackHealthy] : fallbackHealthy;
+            return [...new Set(list)].filter((p): p is string => Boolean(p));
         }
 
         const routing = options?.routing;
         const requireTools = routing?.requireTools ?? (tools && tools.length > 0);
         const requireStreaming = routing?.requireStreaming ?? !!options?.onToken;
         
-        let candidates = Array.from(this.providers.entries())
-            .map(([name, provider]) => ({ name, metadata: provider.getMetadata() }));
-
         candidates = candidates.filter(({ metadata }) => {
             if (requireTools && !metadata.capabilities.tools) return false;
             if (requireStreaming && !metadata.capabilities.streaming) return false;
             if (routing?.requireVision && !metadata.capabilities.vision) return false;
+            
+            // Intent-based filtering
+            const intent = routing?.intent;
+            if (intent) {
+                if (intent.reasoning && !metadata.capabilities.reasoning) return false;
+                if (intent.coding && !metadata.capabilities.coding) return false;
+                if (intent.localOnly && !metadata.capabilities.localOnly) return false;
+                if (intent.privacy && !metadata.capabilities.privacy) return false;
+                if (intent.longContext && !metadata.capabilities.longContext) return false;
+            }
             
             const costLevels = { 'low': 1, 'medium': 2, 'high': 3 };
             if (routing?.maxCost) {
@@ -76,6 +185,11 @@ export class LLMRouter {
                 }
                 return 0; 
             });
+        } else if (routing?.intent?.fastResponse) {
+            candidates.sort((a, b) => {
+                const latencyLevels = { 'low': 1, 'medium': 2, 'high': 3 };
+                return latencyLevels[a.metadata.latency] - latencyLevels[b.metadata.latency];
+            });
         } else {
             candidates.sort((a, b) => {
                 if (a.name === this.defaultProviderName) return -1;
@@ -85,10 +199,18 @@ export class LLMRouter {
         }
 
         const optimalNames = candidates.map(c => c.name);
-        const finalProviders = [...new Set([...optimalNames, ...this.fallbackProviders])].filter((p): p is string => Boolean(p));
+        const fallbackHealthy = this.fallbackProviders.filter(p => {
+            const state = this.healthState.get(p);
+            return state && state.status === 'healthy';
+        });
+        
+        const finalProviders = [...new Set([...optimalNames, ...fallbackHealthy])].filter((p): p is string => Boolean(p));
         
         if (finalProviders.length === 0 && this.defaultProviderName) {
-            return [this.defaultProviderName];
+            const defaultState = this.healthState.get(this.defaultProviderName);
+            if (defaultState && defaultState.status === 'healthy') {
+                return [this.defaultProviderName];
+            }
         }
         return finalProviders;
     }
@@ -100,18 +222,72 @@ export class LLMRouter {
     ) {
         const uniqueProviders = this.getOptimalProviders(options, tools);
 
+        if (uniqueProviders.length === 0) {
+            throw new Error('All providers are unavailable or incompatible with the requested capabilities.');
+        }
+
         let lastError: unknown;
+
+        let isFallback = false;
+        let lastFailedProvider = '';
 
         for (const providerName of uniqueProviders) {
             try {
                 const provider = this.providers.get(providerName);
                 if (!provider) continue;
 
-                return await provider.generate(messages, options, tools);
-            } catch (error) {
+                if (this.eventBus) {
+                    if (isFallback) {
+                        this.eventBus.emit('telemetry', {
+                            eventType: 'provider_fallback',
+                            timestamp: new Date().toISOString(),
+                            provider: providerName,
+                            from: lastFailedProvider,
+                            to: providerName
+                        });
+                    } else {
+                        this.eventBus.emit('telemetry', {
+                            eventType: 'provider_selected',
+                            timestamp: new Date().toISOString(),
+                            provider: providerName
+                        });
+                    }
+                }
+
+                const generatePromise = provider.generate(messages, options, tools);
+                
+                let result: LLMResponse;
+                const startMs = Date.now();
+                if (options?.signal) {
+                    result = await Promise.race([
+                        generatePromise,
+                        new Promise<LLMResponse>((_, reject) => {
+                            if (options.signal!.aborted) {
+                                return reject(new Error('AbortError'));
+                            }
+                            options.signal!.addEventListener('abort', () => reject(new Error('AbortError')));
+                        })
+                    ]);
+                } else {
+                    result = await generatePromise;
+                }
+                
+                this.handleProviderSuccess(providerName);
+                if (this.eventBus) {
+                    this.eventBus.emit('telemetry', {
+                        eventType: 'provider_completed',
+                        timestamp: new Date().toISOString(),
+                        provider: providerName,
+                        durationMs: Date.now() - startMs
+                    });
+                }
+                return result;
+            } catch (error: any) {
+                if (error?.message === 'AbortError') throw error; // Don't fallback on user cancellation
                 lastError = error;
-                console.warn(`[LLMRouter] Provider '${providerName}' failed during generate:`, error);
-                // Continue to the next provider
+                this.handleProviderFailure(providerName, error);
+                lastFailedProvider = providerName;
+                isFallback = true;
             }
         }
 
@@ -126,6 +302,11 @@ export class LLMRouter {
         tools?: ToolSchema[]
     ) {
         const uniqueProviders = this.getOptimalProviders(options, tools);
+
+        if (uniqueProviders.length === 0) {
+            throw new Error('All providers are unavailable or incompatible with the requested capabilities.');
+        }
+
         let lastError: unknown;
 
         // Try the primary provider that owns the continuationId
@@ -134,22 +315,54 @@ export class LLMRouter {
             try {
                 const provider = this.providers.get(primaryProviderName);
                 if (provider) {
-                    return await provider.continueWithToolResults(
+                    const continuePromise = provider.continueWithToolResults(
                         continuationId,
                         results,
                         messages,
                         options,
                         tools
                     );
+                    
+                    let result: LLMResponse;
+                    if (options?.signal) {
+                        result = await Promise.race([
+                            continuePromise,
+                            new Promise<LLMResponse>((_, reject) => {
+                                if (options.signal!.aborted) {
+                                    return reject(new Error('AbortError'));
+                                }
+                                options.signal!.addEventListener('abort', () => reject(new Error('AbortError')));
+                            })
+                        ]);
+                    } else {
+                        result = await continuePromise;
+                    }
+                    
+                    this.handleProviderSuccess(primaryProviderName);
+                    return result;
                 }
-            } catch (error) {
+            } catch (error: any) {
+                if (error?.message === 'AbortError') throw error; // Don't fallback on user cancellation
                 lastError = error;
-                console.warn(`\n[LLMRouter] Primary provider '${primaryProviderName}' failed on continueWithToolResults. Falling back...`);
+                this.handleProviderFailure(primaryProviderName, error);
+                if (this.eventBus) {
+                    this.eventBus.emit('telemetry', {
+                        eventType: 'provider_failed',
+                        timestamp: new Date().toISOString(),
+                        provider: primaryProviderName,
+                        errorCategory: classifyError(error)
+                    });
+                }
             }
         }
 
-        // If the primary provider fails, we cannot safely resume the same continuation context on another provider.
-        // Instead, we recreate the conversation tool history manually and use generate() on the fallback providers.
+        // Filter the remaining providers. Re-run getOptimalProviders in case handleProviderFailure marked primary as unhealthy.
+        const fallbackProvidersList = this.getOptimalProviders(options, tools).filter(p => p !== primaryProviderName);
+
+        if (fallbackProvidersList.length === 0) {
+            throw lastError ?? new Error('All fallback providers are unavailable.');
+        }
+
         const toolCallsContent = JSON.stringify(results.map(r => ({
             name: r.toolName,
             id: r.toolCallId,
@@ -167,16 +380,54 @@ export class LLMRouter {
             { role: 'user', content: `[System Note: Tool execution results: ${toolResultsContent}]` },
         ];
 
+        let isFallback = true;
+        let lastFailedProvider = primaryProviderName || '';
         // Try the remaining fallback providers
-        for (let i = 1; i < uniqueProviders.length; i++) {
-            const providerName = uniqueProviders[i];
+        for (const providerName of fallbackProvidersList) {
             try {
                 const provider = this.providers.get(providerName);
                 if (!provider) continue;
 
-                return await provider.generate(fallbackMessages, options, tools);
-            } catch (error) {
+                if (this.eventBus) {
+                    this.eventBus.emit('telemetry', {
+                        eventType: 'provider_fallback',
+                        timestamp: new Date().toISOString(),
+                        provider: providerName,
+                        from: lastFailedProvider,
+                        to: providerName
+                    });
+                }
+
+                const generatePromise = provider.generate(fallbackMessages, options, tools);
+                let result: LLMResponse;
+                if (options?.signal) {
+                    result = await Promise.race([
+                        generatePromise,
+                        new Promise<LLMResponse>((_, reject) => {
+                            if (options.signal!.aborted) {
+                                return reject(new Error('AbortError'));
+                            }
+                            options.signal!.addEventListener('abort', () => reject(new Error('AbortError')));
+                        })
+                    ]);
+                } else {
+                    result = await generatePromise;
+                }
+
+                this.handleProviderSuccess(providerName);
+                if (this.eventBus) {
+                    this.eventBus.emit('telemetry', {
+                        eventType: 'provider_completed',
+                        timestamp: new Date().toISOString(),
+                        provider: providerName
+                    });
+                }
+                return result;
+            } catch (error: any) {
+                if (error?.message === 'AbortError') throw error; // Don't fallback on user cancellation
                 lastError = error;
+                this.handleProviderFailure(providerName, error);
+                lastFailedProvider = providerName;
             }
         }
 

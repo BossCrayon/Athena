@@ -18,15 +18,29 @@ import { searchFilesTool } from '../tools/search-files.js';
 import { runCommandTool } from '../tools/run-command.js';
 import { locateItemTool } from '../tools/locate-item.js';
 import { systemControlTool } from '../tools/system-control.js';
+import { captureScreenshotTool } from '../tools/capture_screenshot.js';
 
 const SERVER_URL = process.env.ATHENA_SERVER_URL || 'ws://localhost:3000/nodes';
 const NODE_NAME = os.hostname();
 const NODE_ID = 'node-' + NODE_NAME.toLowerCase();
 
+const NODE_AUTH_TOKEN = process.env.NODE_AUTH_TOKEN || '';
+if (!NODE_AUTH_TOKEN) {
+    console.error('[Node] Warning: NODE_AUTH_TOKEN is not set in .env! Connection will likely be rejected.');
+}
+
+let reconnectDelay = 1000;
+const MAX_RECONNECT_DELAY = 30000;
+
+const capabilities = [
+    'system_info', 'current_time', 'web_search', 'fetch_url', 'get_weather',
+    'list_directory', 'read_file', 'search_files', 'run_command', 'locate_item', 'system_control',
+    'capture_screenshot'
+];
+
 async function startNode() {
     console.log(`[Node] Starting Athena Node daemon for ${NODE_NAME}...`);
     
-    // Setup local tools
     const toolRegistry = new ToolRegistry();
     toolRegistry.register(systemInfoTool);
     toolRegistry.register(currentTimeTool);
@@ -39,32 +53,38 @@ async function startNode() {
     toolRegistry.register(runCommandTool);
     toolRegistry.register(locateItemTool);
     toolRegistry.register(systemControlTool);
+    toolRegistry.register(captureScreenshotTool);
 
     const permissions = new PermissionManager();
-    const executor = new ToolExecutor(toolRegistry, permissions); // No NodeManager passed, so it runs locally!
+    const executor = new ToolExecutor(toolRegistry, permissions);
 
     let ws = new WebSocket(SERVER_URL);
 
     ws.on('open', () => {
         console.log(`[Node] Connected to Cloud Brain at ${SERVER_URL}`);
+        reconnectDelay = 1000; // reset delay on successful connection
         ws.send(JSON.stringify({
             type: 'node_register',
             id: NODE_ID,
-            name: NODE_NAME
+            name: NODE_NAME,
+            token: NODE_AUTH_TOKEN,
+            capabilities
         }));
     });
 
     ws.on('message', async (data) => {
         try {
             const message = JSON.parse(data.toString());
-            if (message.type === 'execute_tool') {
+            if (message.type === 'ping') {
+                ws.send(JSON.stringify({ type: 'pong' }));
+            } else if (message.type === 'execute_tool') {
                 const { callId, toolName, args } = message;
                 console.log(`[Node] Executing tool request: ${toolName}`);
                 
                 try {
                     const result = await executor.execute(toolName, args, { 
                         cwd: process.cwd(),
-                        askPermission: async () => true // Auto-allow for now, assuming the Brain already confirmed intent.
+                        askPermission: async () => true
                     });
                     ws.send(JSON.stringify({
                         type: 'tool_result',
@@ -78,15 +98,19 @@ async function startNode() {
                         result: { success: false, output: '', error: err.message }
                     }));
                 }
+            } else if (message.type === 'error') {
+                console.error(`[Node] Server Error: ${message.message}`);
             }
         } catch (err) {
             console.error('[Node] Error processing message:', err);
         }
     });
 
-    ws.on('close', () => {
-        console.log('[Node] Disconnected from Cloud Brain. Reconnecting in 5 seconds...');
-        setTimeout(startNode, 5000);
+    ws.on('close', (code, reason) => {
+        console.log(`[Node] Disconnected from Cloud Brain (Code: ${code}, Reason: ${reason}).`);
+        console.log(`[Node] Reconnecting in ${reconnectDelay / 1000} seconds...`);
+        setTimeout(startNode, reconnectDelay);
+        reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
     });
 
     ws.on('error', (err: any) => {

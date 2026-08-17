@@ -1,5 +1,6 @@
 import { tavily } from '@tavily/core';
 import type { Tool } from './types.js';
+import type { SearchResult, ExternalObservation } from '../core/external.js';
 
 export const webSearchTool: Tool = {
     definition: {
@@ -18,6 +19,8 @@ export const webSearchTool: Tool = {
                 },
             ],
         },
+        },
+        isParallelizable: true
     },
 
     async execute(args: Record<string, unknown>) {
@@ -49,26 +52,47 @@ export const webSearchTool: Tool = {
                 includeAnswer: true,
             });
             
-            let output = `Search Results for "${query}":\n\n`;
+            let observations: ExternalObservation[] = [];
 
             if (response.answer) {
-                output += `--- AI Answer ---\n${response.answer}\n\n`;
+                observations.push({
+                    content: response.answer,
+                    source: {
+                        url: 'https://tavily.com',
+                        domain: 'tavily.com',
+                        retrievedAt: Date.now(),
+                        sourceType: 'unknown'
+                    },
+                    confidence: 'medium',
+                    title: `AI Summary for: ${query}`
+                });
             }
 
             if (response.results && response.results.length > 0) {
-                output += `--- Sources ---\n`;
-                response.results.forEach((res, i) => {
-                    output += `${i + 1}. ${res.title}\n`;
-                    output += `   URL: ${res.url}\n`;
-                    output += `   Content: ${res.content}\n\n`;
-                });
-            } else {
-                output += 'No organic results found.';
+                for (const res of response.results) {
+                    let domain = '';
+                    try {
+                        domain = new URL(res.url).hostname;
+                    } catch {}
+                    
+                    observations.push({
+                        content: res.content,
+                        source: {
+                            url: res.url,
+                            domain,
+                            retrievedAt: Date.now(),
+                            sourceType: 'unknown',
+                            publishedAt: undefined // Tavily advanced might not return this standardly, leave undefined
+                        },
+                        title: res.title,
+                        snippet: res.content.substring(0, 500)
+                    });
+                }
             }
 
             return {
                 success: true,
-                output: output.trim(),
+                output: JSON.stringify(observations),
             };
         } catch (error) {
             return {

@@ -83,10 +83,16 @@ export class OpenRouterProvider implements LLMProvider {
         options?: GenerationOptions,
         tools?: ToolSchema[]
     ): Promise<LLMResponse> {
-        const formattedMessages: OpenAI.Chat.ChatCompletionMessageParam[] = messages.map(m => ({
-            role: m.role === 'model' ? 'assistant' : m.role,
-            content: m.content
-        }));
+        const formattedMessages: OpenAI.Chat.ChatCompletionMessageParam[] = messages.map(m => {
+            const contentString = typeof m.content === 'string' 
+                ? m.content 
+                : m.content.map(p => p.type === 'text' ? p.text : '[Unsupported Image Data]').join('\n');
+            
+            return {
+                role: m.role === 'model' ? 'assistant' : m.role,
+                content: contentString
+            } as OpenAI.Chat.ChatCompletionMessageParam;
+        });
 
         const stream = await this.client.chat.completions.create({
             model: this.model,

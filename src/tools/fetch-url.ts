@@ -1,6 +1,7 @@
 import * as cheerio from 'cheerio';
 import TurndownService from 'turndown';
 import type { Tool } from './types.js';
+import { fetchWithSecurity, type ExternalObservation } from '../core/external.js';
 
 export const fetchUrlTool: Tool = {
     definition: {
@@ -19,6 +20,7 @@ export const fetchUrlTool: Tool = {
                 },
             ],
         },
+        isParallelizable: true
     },
 
     async execute(args: Record<string, unknown>) {
@@ -32,17 +34,17 @@ export const fetchUrlTool: Tool = {
         }
 
         try {
-            const response = await fetch(url, {
+            const response = await fetchWithSecurity(url, {
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
                 }
             });
 
-            if (!response.ok) {
+            if (response.status >= 400) {
                 throw new Error(`HTTP Error: ${response.status} ${response.statusText}`);
             }
 
-            const html = await response.text();
+            const html = response.text;
             
             // Parse HTML and remove clutter
             const $ = cheerio.load(html);
@@ -68,9 +70,24 @@ export const fetchUrlTool: Tool = {
                 ? markdown.substring(0, MAX_LENGTH) + '\n\n... [Content Truncated]' 
                 : markdown;
 
+            let domain = '';
+            try {
+                domain = new URL(response.url).hostname;
+            } catch {}
+
+            const observation: ExternalObservation = {
+                content: finalOutput,
+                source: {
+                    url: response.url,
+                    domain,
+                    retrievedAt: Date.now(),
+                    sourceType: 'unknown'
+                }
+            };
+
             return {
                 success: true,
-                output: `Source: ${url}\n\n${finalOutput}`,
+                output: JSON.stringify([observation]),
             };
         } catch (error) {
             return {

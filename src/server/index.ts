@@ -38,9 +38,19 @@ const fastify = Fastify({ logger: true });
 fastify.register(cors, { origin: true });
 fastify.register(websocket);
 
+import { EventBus } from '../core/events.js';
+import { TaskQueue } from '../core/task-queue.js';
+import { Scheduler } from '../core/scheduler.js';
+import { AutonomousRuntime } from '../core/autonomous-runtime.js';
+import { ContextBuilder } from '../core/context-builder.js';
+import { MemoryExtractor } from '../core/memory-extractor.js';
+import { TaskStore } from '../core/task-store.js';
+import { TelemetryTracker } from '../core/telemetry.js';
+import { DiagnosticHandler } from '../core/diagnostics.js';
+
 // Initialize ATHENA backend
-async function setupAthena(nodeManager: NodeManager) {
-    const router = new LLMRouter();
+async function setupAthena(nodeManager: NodeManager, eventBus: EventBus) {
+    const router = new LLMRouter(eventBus);
     const fallbackOrder: string[] = [];
 
     if (process.env.GEMINI_API_KEY) {
@@ -86,6 +96,9 @@ async function setupAthena(nodeManager: NodeManager) {
     const executor = new ToolExecutor(toolRegistry, permissions, nodeManager);
     const toolOrchestrator = new ToolOrchestrator(toolRegistry, executor);
     const memoryManager = new CloudMemoryManager();
+    const contextBuilder = new ContextBuilder(memoryManager);
+    const memoryExtractor = new MemoryExtractor(router, memoryManager);
+    const taskStore = new TaskStore();
 
     const athena = new AthenaCore(
         router,
@@ -93,28 +106,133 @@ async function setupAthena(nodeManager: NodeManager) {
         toolOrchestrator,
         {
             cwd: process.cwd(),
-            // For headless server, we auto-allow confirm tools or we deny them.
-            askPermission: async () => true // Auto-allow for now to ensure remote apps can use tools.
+            askPermission: async () => true
         },
-        memoryManager
+        memoryManager,
+        contextBuilder,
+        taskStore,
+        eventBus
     );
 
     await athena.initialize();
-    return athena;
+
+    const taskQueue = new TaskQueue(taskStore);
+    const scheduler = new Scheduler(taskQueue, taskStore);
+    const autonomousRuntime = new AutonomousRuntime(
+        taskQueue, 
+        athena.getTaskEngine(), 
+        eventBus, 
+        contextBuilder, 
+        memoryExtractor, 
+        memoryManager,
+        taskStore
+    );
+
+    // Phase I: Persisted recovery
+    await scheduler.loadPersisted();
+    await autonomousRuntime.recover();
+
+    return { athena, eventBus, taskQueue, scheduler, autonomousRuntime, router };
 }
 
 fastify.register(async function (app) {
-    const nodeManager = new NodeManager();
-    const athena = await setupAthena(nodeManager);
+    const eventBus = new EventBus();
+    const telemetryTracker = new TelemetryTracker(eventBus);
+
+    const nodeManager = new NodeManager(process.env.NODE_AUTH_TOKEN, eventBus);
+    const { athena, scheduler, autonomousRuntime, taskQueue, router } = await setupAthena(nodeManager, eventBus);
+    const diagnostics = new DiagnosticHandler(autonomousRuntime, taskQueue, router, nodeManager);
+
+    // Start background services
+    scheduler.start();
+    autonomousRuntime.start();
+
+    let isShuttingDown = false;
+
+    // Ensure graceful shutdown
+    app.addHook('onClose', async (instance) => {
+        if (!isShuttingDown) {
+            isShuttingDown = true;
+            scheduler.stop();
+            await autonomousRuntime.shutdownGracefully(30000); // Wait up to 30s
+        }
+    });
+    
+    // Process signal handlers
+    const handleShutdown = async (signal: string) => {
+        console.log(`\n[Server] Received ${signal}. Starting graceful shutdown...`);
+        if (isShuttingDown) return;
+        isShuttingDown = true;
+        
+        scheduler.stop();
+        await autonomousRuntime.shutdownGracefully(30000);
+        
+        console.log('[Server] Closing Fastify server...');
+        await app.close();
+        console.log('[Server] Fastify server closed. Exiting process.');
+        process.exit(0);
+    };
+
+    process.on('SIGTERM', () => handleShutdown('SIGTERM'));
+    process.on('SIGINT', () => handleShutdown('SIGINT'));
+
+    // Render Health Endpoint (Liveness)
+    app.get('/health', async (req, res) => {
+        if (isShuttingDown || autonomousRuntime.isShuttingDown()) {
+            return res.status(503).send({ status: 'shutting_down' });
+        }
+        return res.send({
+            status: 'ok',
+            workerId: autonomousRuntime.workerId,
+            runtime: autonomousRuntime.getIsRunning() ? 'running' : 'stopped',
+            activeTasks: autonomousRuntime.getActiveTaskCount()
+        });
+    });
+
+    // Readiness Endpoint
+    app.get('/ready', async (req, res) => {
+        if (isShuttingDown || autonomousRuntime.isShuttingDown()) {
+            return res.status(503).send({ status: 'not_ready', reason: 'shutting_down' });
+        }
+        
+        if (!autonomousRuntime.getIsRunning()) {
+            return res.status(503).send({ status: 'not_ready', reason: 'runtime_stopped' });
+        }
+
+        try {
+            // Check critical database connectivity if applicable (TaskStore health)
+            // Assuming task store is initialized and accessible.
+            // Fast failing if there's a connection issue.
+            const { error } = await athena['taskStore']?.listIncomplete().then(() => ({ error: null })).catch(e => ({ error: e })) || { error: null };
+            if (error) {
+                return res.status(503).send({ status: 'not_ready', reason: 'database_unavailable' });
+            }
+        } catch (e) {
+            return res.status(503).send({ status: 'not_ready', reason: 'database_unavailable' });
+        }
+
+        return res.send({
+            status: 'ready',
+            workerId: autonomousRuntime.workerId
+        });
+    });
 
     app.get('/chat', { websocket: true }, (connection: any, req) => {
         connection.on('message', async (message: string) => {
             try {
                 const data = JSON.parse(message);
                 if (data.type === 'text') {
+                    const diagResult = diagnostics.handleCommand(data.text);
+                    if (diagResult !== null) {
+                        connection.send(JSON.stringify({ type: 'token', text: diagResult }));
+                        connection.send(JSON.stringify({ type: 'done' }));
+                        return;
+                    }
+
                     // Start streaming response
                     await athena.chat(
-                        data.text, 
+                        data.text,
+                        data.attachments,
                         (token) => {
                             connection.send(JSON.stringify({ type: 'token', text: token }));
                         },
@@ -136,7 +254,7 @@ fastify.register(async function (app) {
                 const data = JSON.parse(message);
                 if (data.type === 'node_register') {
                     const nodeType = data.nodeType || 'laptop';
-                    nodeManager.registerNode(connection, data.id, data.name, nodeType);
+                    nodeManager.registerNode(connection, data.id, data.name, nodeType, data.token);
                 }
             } catch (err) {
                 console.error('Node WS Error:', err);

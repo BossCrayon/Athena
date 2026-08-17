@@ -2,9 +2,29 @@ import type { ToolSchema } from '../tools/schema.js';
 
 export type Role = 'user' | 'model' | 'system';
 
+export type MessageContentPart =
+    | {
+          type: 'text';
+          text: string;
+      }
+    | {
+          type: 'image';
+          mimeType: string;
+          data?: string;
+          uri?: string;
+          width?: number;
+          height?: number;
+      }
+    | {
+          type: 'document';
+          mimeType: string;
+          data?: string;
+          uri?: string;
+      };
+
 export interface Message {
     role: Role;
-    content: string;
+    content: string | MessageContentPart[];
 }
 
 export interface RoutingPreferences {
@@ -17,10 +37,28 @@ export interface RoutingPreferences {
 
 export interface GenerationOptions {
     temperature?: number;
+    maxTokens?: number;
     maxOutputTokens?: number;
     provider?: string;
+    systemPrompt?: string;
     onToken?: (text: string) => void;
-    routing?: RoutingPreferences;
+    signal?: AbortSignal;
+    routing?: {
+        priority?: 'cost' | 'latency';
+        requireTools?: boolean;
+        requireStreaming?: boolean;
+        requireVision?: boolean;
+        maxCost?: 'low' | 'medium' | 'high';
+        // New intent-based requirements
+        intent?: {
+            reasoning?: boolean;
+            coding?: boolean;
+            fastResponse?: boolean;
+            privacy?: boolean;
+            localOnly?: boolean;
+            longContext?: boolean;
+        };
+    };
 }
 
 export interface ToolCall {
@@ -35,6 +73,7 @@ export interface ToolResult {
     success: boolean;
     output: string;
     error?: string;
+    attachments?: MessageContentPart[];
 }
 
 export interface LLMResponse {
@@ -56,9 +95,23 @@ export interface ProviderMetadata {
         tools: boolean;
         vision: boolean;
         streaming: boolean;
+        reasoning?: boolean;
+        coding?: boolean;
+        localOnly?: boolean;
+        privacy?: boolean;
+        longContext?: boolean;
     };
     cost: 'low' | 'medium' | 'high';
     latency: 'low' | 'medium' | 'high';
+}
+
+export type ProviderStatus = 'healthy' | 'rate-limited' | 'error' | 'offline';
+
+export interface ProviderHealth {
+    status: ProviderStatus;
+    failures: number;
+    successes: number;
+    cooldownUntil?: number;
 }
 
 export interface LLMProvider {

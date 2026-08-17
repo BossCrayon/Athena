@@ -7,12 +7,14 @@
     "preview": {
       "android": {
         "buildType": "apk"
-      }
+      },
+      "channel": "preview"
     },
     "production": {
       "android": {
-        "buildType": "aab"
-      }
+        "buildType": "app-bundle"
+      },
+      "channel": "production"
     }
   }
 }

@@ -16,9 +16,14 @@ import * as Battery from 'expo-battery';
 import * as Haptics from 'expo-haptics';
 import * as Location from 'expo-location';
 import * as Updates from 'expo-updates';
+import * as SecureStore from 'expo-secure-store';
+import * as Crypto from 'expo-crypto';
+import * as ImagePicker from 'expo-image-picker';
 
 const WS_URL_CHAT = 'wss://athena-brain.onrender.com/chat';
 const WS_URL_NODE = 'wss://athena-brain.onrender.com/nodes';
+
+const NODE_CAPABILITIES = ['get_battery_level', 'vibrate_phone', 'get_location', 'capture_image'];
 
 interface Message {
   id: string;
@@ -29,7 +34,38 @@ interface Message {
 }
 
 export default function App() {
-  const [mode, setMode] = useState<'selecting' | 'ai' | 'hardware'>('selecting');
+  const [mode, setMode] = useState<'selecting' | 'ai' | 'hardware' | 'auth'>('selecting');
+  const [tokenInput, setTokenInput] = useState('');
+  const [hasToken, setHasToken] = useState(false);
+  const [nodeId, setNodeId] = useState('');
+
+  useEffect(() => {
+    async function loadIdentity() {
+      let storedId = await SecureStore.getItemAsync('ATHENA_MOBILE_NODE_ID');
+      if (!storedId) {
+        storedId = 'mobile-' + Crypto.randomUUID();
+        await SecureStore.setItemAsync('ATHENA_MOBILE_NODE_ID', storedId);
+      }
+      setNodeId(storedId);
+
+      const storedToken = await SecureStore.getItemAsync('NODE_AUTH_TOKEN');
+      setHasToken(!!storedToken);
+    }
+    loadIdentity();
+  }, []);
+
+  const handleSetToken = async () => {
+    if (tokenInput.trim()) {
+      await SecureStore.setItemAsync('NODE_AUTH_TOKEN', tokenInput.trim());
+      setHasToken(true);
+      setMode('hardware');
+    }
+  };
+
+  const handleClearToken = async () => {
+    await SecureStore.deleteItemAsync('NODE_AUTH_TOKEN');
+    setHasToken(false);
+  };
 
   if (mode === 'selecting') {
     return (
@@ -43,22 +79,59 @@ export default function App() {
           <Text style={styles.modeCardDesc}>Connect to Athena's Cloud Brain for chatting and searching only. No hardware access.</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.modeCardHardware} onPress={() => setMode('hardware')}>
+        <TouchableOpacity 
+          style={styles.modeCardHardware} 
+          onPress={() => hasToken ? setMode('hardware') : setMode('auth')}
+        >
           <Text style={styles.modeCardTitleHardware}>Hardware Link</Text>
           <Text style={styles.modeCardDesc}>Register this phone as a Mobile Node. Athena will be able to access battery, vibrate the phone, and retrieve location.</Text>
+          {hasToken && (
+             <TouchableOpacity style={{ marginTop: 15 }} onPress={handleClearToken}>
+               <Text style={{ color: '#ff4444', fontSize: 12 }}>CLEAR SAVED CREDENTIALS</Text>
+             </TouchableOpacity>
+          )}
         </TouchableOpacity>
       </View>
     );
   }
 
-  return <ChatScreen mode={mode} />;
+  if (mode === 'auth') {
+    return (
+      <View style={styles.startupContainer}>
+        <StatusBar style="light" />
+        <Text style={styles.startupTitle}>AUTH REQUIRED</Text>
+        <Text style={styles.startupSubtitle}>Enter NODE_AUTH_TOKEN to register hardware</Text>
+        
+        <TextInput
+          style={[styles.textInput, { marginBottom: 20 }]}
+          placeholder="Auth Token"
+          placeholderTextColor="#4a5568"
+          secureTextEntry={true}
+          value={tokenInput}
+          onChangeText={setTokenInput}
+          autoCapitalize="none"
+        />
+        
+        <TouchableOpacity style={styles.sendButton} onPress={handleSetToken}>
+          <Text style={styles.sendButtonText}>SECURE LOGIN</Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity style={{ marginTop: 20 }} onPress={() => setMode('selecting')}>
+          <Text style={{ color: '#8892b0', textAlign: 'center' }}>Cancel</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  return <ChatScreen mode={mode} nodeId={nodeId} />;
 }
 
-function ChatScreen({ mode }: { mode: 'ai' | 'hardware' }) {
+function ChatScreen({ mode, nodeId }: { mode: 'ai' | 'hardware', nodeId: string }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isConnected, setIsConnected] = useState(false);
   const [isWaiting, setIsWaiting] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<{ uri: string, base64: string, mimeType: string } | null>(null);
   
   const wsChatRef = useRef<WebSocket | null>(null);
   const wsNodeRef = useRef<WebSocket | null>(null);
@@ -76,71 +149,84 @@ function ChatScreen({ mode }: { mode: 'ai' | 'hardware' }) {
     };
   }, []);
 
+  let nodeReconnectDelay = 1000;
   const connectNodeWebSocket = async () => {
     // Request location permissions upfront if we're in hardware mode
     await Location.requestForegroundPermissionsAsync();
+    const token = await SecureStore.getItemAsync('NODE_AUTH_TOKEN');
 
     const wsNode = new WebSocket(WS_URL_NODE);
     wsNode.onopen = () => {
       console.log('Mobile Node connected');
+      nodeReconnectDelay = 1000;
       wsNode.send(JSON.stringify({
         type: 'node_register',
-        id: 'mobile-node-' + Math.floor(Math.random() * 10000),
+        id: nodeId,
         name: Platform.OS + ' Phone',
-        nodeType: 'mobile'
+        nodeType: 'mobile',
+        token,
+        capabilities: NODE_CAPABILITIES
       }));
     };
 
     wsNode.onmessage = async (event) => {
       try {
         const message = JSON.parse(event.data);
-        if (message.type === 'execute_tool') {
-          console.log('Received hardware command:', message.toolName);
-          let result: any = null;
+          if (message.type === 'ping') {
+            wsNode.send(JSON.stringify({ type: 'pong' }));
+          } else if (message.type === 'execute_tool') {
+            console.log('Received hardware command:', message.toolName);
+            let result: any = null;
 
-          if (message.toolName === 'get_battery_level') {
-            const level = await Battery.getBatteryLevelAsync();
-            const state = await Battery.getBatteryStateAsync();
-            let stateStr = 'Unknown';
-            if (state === Battery.BatteryState.UNPLUGGED) stateStr = 'Unplugged (Running on battery)';
-            else if (state === Battery.BatteryState.CHARGING) stateStr = 'Charging';
-            else if (state === Battery.BatteryState.FULL) stateStr = 'Fully Charged';
-            result = `🔋 Battery Level: ${Math.round(level * 100)}%\n⚡ Status: ${stateStr}`;
-          } 
-          else if (message.toolName === 'vibrate_phone') {
-            const style = message.args?.style || 'medium';
-            if (style === 'heavy') await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-            else if (style === 'light') await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            else if (style === 'success') await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            else await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            result = `Phone vibrated with style: ${style}`;
-          }
-          else if (message.toolName === 'get_location') {
-            let { status } = await Location.getForegroundPermissionsAsync();
-            if (status !== 'granted') {
-              result = 'Location permission denied by user.';
-            } else {
-              let location = await Location.getCurrentPositionAsync({});
-              result = `Lat: ${location.coords.latitude}, Lon: ${location.coords.longitude}`;
+            if (message.toolName === 'get_battery_level') {
+              const level = await Battery.getBatteryLevelAsync();
+              const state = await Battery.getBatteryStateAsync();
+              let stateStr = 'Unknown';
+              if (state === Battery.BatteryState.UNPLUGGED) stateStr = 'Unplugged (Running on battery)';
+              else if (state === Battery.BatteryState.CHARGING) stateStr = 'Charging';
+              else if (state === Battery.BatteryState.FULL) stateStr = 'Fully Charged';
+              result = `🔋 Battery Level: ${Math.round(level * 100)}%\n⚡ Status: ${stateStr}`;
+            } 
+            else if (message.toolName === 'vibrate_phone') {
+              const style = message.args?.style || 'medium';
+              if (style === 'heavy') await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+              else if (style === 'light') await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              else if (style === 'success') await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+              else await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+              result = `Phone vibrated with style: ${style}`;
             }
-          }
-          else {
-            result = `Unknown mobile tool: ${message.toolName}`;
-          }
+            else if (message.toolName === 'get_location') {
+              let { status } = await Location.getForegroundPermissionsAsync();
+              if (status !== 'granted') {
+                result = 'Location permission denied by user.';
+              } else {
+                let location = await Location.getCurrentPositionAsync({});
+                result = `Lat: ${location.coords.latitude}, Lon: ${location.coords.longitude}`;
+              }
+            }
+            else {
+              result = `Unknown mobile tool: ${message.toolName}`;
+            }
 
-          wsNode.send(JSON.stringify({
-            type: 'tool_result',
-            callId: message.callId,
-            result: result
-          }));
+            wsNode.send(JSON.stringify({
+              type: 'tool_result',
+              callId: message.callId,
+              result: result
+            }));
+          }
+        } catch (err) {
+          console.error('Mobile Node error', err);
         }
-      } catch (err) {
-        console.error('Mobile Node error', err);
-      }
-    };
+      };
 
-    wsNodeRef.current = wsNode;
-  };
+      wsNode.onclose = () => {
+        console.log('Mobile Node disconnected. Reconnecting in', nodeReconnectDelay);
+        setTimeout(connectNodeWebSocket, nodeReconnectDelay);
+        nodeReconnectDelay = Math.min(nodeReconnectDelay * 2, 30000);
+      };
+
+      wsNodeRef.current = wsNode;
+    };
 
   const connectChatWebSocket = () => {
     const ws = new WebSocket(WS_URL_CHAT);
@@ -201,12 +287,42 @@ function ChatScreen({ mode }: { mode: 'ai' | 'hardware' }) {
   };
 
   const sendMessage = () => {
-    if (!inputText.trim() || !isConnected) return;
-    const userMsg: Message = { id: Date.now().toString(), sender: 'user', text: inputText.trim() };
+    if ((!inputText.trim() && !selectedImage) || !isConnected) return;
+    const textMsg = inputText.trim() || 'Please analyze this image.';
+    const userMsg: Message = { id: Date.now().toString(), sender: 'user', text: textMsg + (selectedImage ? ' [Image attached]' : '') };
     setMessages((prev) => [...prev, userMsg]);
     setIsWaiting(true);
-    wsChatRef.current?.send(JSON.stringify({ type: 'text', text: inputText.trim() }));
+    
+    const payload: any = { type: 'text', text: textMsg };
+    if (selectedImage && selectedImage.base64) {
+      payload.attachments = [{
+        type: 'image',
+        mimeType: selectedImage.mimeType,
+        data: selectedImage.base64
+      }];
+    }
+    
+    wsChatRef.current?.send(JSON.stringify(payload));
     setInputText('');
+    setSelectedImage(null);
+  };
+
+  const handlePickImage = async () => {
+    let result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.7,
+      base64: true,
+    });
+
+    if (!result.canceled && result.assets && result.assets.length > 0) {
+      const asset = result.assets[0];
+      setSelectedImage({
+        uri: asset.uri,
+        base64: asset.base64 || '',
+        mimeType: asset.mimeType || 'image/jpeg'
+      });
+    }
   };
 
   const handleCheckForUpdates = async () => {
@@ -283,6 +399,9 @@ function ChatScreen({ mode }: { mode: 'ai' | 'hardware' }) {
           <TouchableOpacity style={styles.clearButton} onPress={() => setMessages([])}>
             <Text style={styles.clearButtonText}>CLR</Text>
           </TouchableOpacity>
+          <TouchableOpacity style={{ padding: 10, marginRight: 5, backgroundColor: selectedImage ? '#00e5ff22' : 'transparent', borderRadius: 20 }} onPress={handlePickImage}>
+            <Text style={{ fontSize: 20 }}>{selectedImage ? '🖼️' : '📎'}</Text>
+          </TouchableOpacity>
           <TextInput
             style={styles.textInput}
             placeholder="Command override..."
@@ -294,7 +413,7 @@ function ChatScreen({ mode }: { mode: 'ai' | 'hardware' }) {
             multiline={true}
             maxLength={1000}
           />
-          <TouchableOpacity style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]} onPress={sendMessage} disabled={!inputText.trim()}>
+          <TouchableOpacity style={[styles.sendButton, (!inputText.trim() && !selectedImage) && styles.sendButtonDisabled]} onPress={sendMessage} disabled={!inputText.trim() && !selectedImage}>
             <Text style={styles.sendButtonText}>SEND</Text>
           </TouchableOpacity>
         </View>

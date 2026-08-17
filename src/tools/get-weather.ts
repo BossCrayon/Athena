@@ -1,4 +1,5 @@
 import type { Tool } from './types.js';
+import { fetchWithSecurity, type ExternalObservation } from '../core/external.js';
 
 export const getWeatherTool: Tool = {
     definition: {
@@ -29,6 +30,7 @@ export const getWeatherTool: Tool = {
                 },
             ],
         },
+        isParallelizable: true
     },
 
     async execute(args: Record<string, unknown>) {
@@ -48,13 +50,13 @@ export const getWeatherTool: Tool = {
             // Fetch using Open-Meteo (No API key required)
             const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,precipitation,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min,uv_index_max&timezone=auto`;
             
-            const response = await fetch(url);
+            const response = await fetchWithSecurity(url);
 
-            if (!response.ok) {
+            if (response.status >= 400) {
                 throw new Error(`HTTP Error: ${response.status} ${response.statusText}`);
             }
 
-            const data = await response.json();
+            const data = JSON.parse(response.text);
             
             // Map WMO Weather interpretation codes
             const weatherCodeMap: Record<number, string> = {
@@ -90,9 +92,21 @@ export const getWeatherTool: Tool = {
                 output += `Max UV Index: ${data.daily.uv_index_max[0]}\n`;
             }
 
+            const observation: ExternalObservation = {
+                content: output.trim(),
+                source: {
+                    url,
+                    domain: 'open-meteo.com',
+                    retrievedAt: Date.now(),
+                    sourceType: 'official' // Official weather provider for our context
+                },
+                freshness: 'current',
+                confidence: 'high'
+            };
+
             return {
                 success: true,
-                output: output.trim(),
+                output: JSON.stringify([observation]),
             };
         } catch (error) {
             return {

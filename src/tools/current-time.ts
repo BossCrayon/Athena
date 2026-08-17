@@ -7,11 +7,11 @@ export const currentTimeTool: Tool = {
             'Returns the current date and time of the computer running ATHENA.',
         permission: 'safe',
         schema: {
-            name: 'get_current_time',
-            description:
-                'Returns the current date and time of the computer running ATHENA.',
+            name: 'current_time',
+            description: 'Gets the current local time in ISO format.',
             parameters: [],
         },
+        isParallelizable: true
     },
 
     async execute(): Promise<{

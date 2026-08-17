@@ -73,25 +73,28 @@ export class ToolExecutor {
             ];
 
             if (this.nodeManager) {
+                const correlationContext = context.task ? {
+                    taskId: context.task.id,
+                    stepId: context.step?.id || '',
+                    executionKey: context.step?.executionKey || ''
+                } : undefined;
+
                 if (laptopDeviceTools.includes(toolName)) {
-                    const output = await this.nodeManager.executeToolOnNode(toolName, args, 'laptop');
+                    const output = await this.nodeManager.executeToolOnNode(toolName, args, 'laptop', context.signal, correlationContext);
                     return { success: true, output: String(output) };
                 } else if (mobileDeviceTools.includes(toolName)) {
-                    const output = await this.nodeManager.executeToolOnNode(toolName, args, 'mobile');
+                    const output = await this.nodeManager.executeToolOnNode(toolName, args, 'mobile', context.signal, correlationContext);
                     return { success: true, output: String(output) };
                 }
             }
             
             // Cloud-native tools (memory, weather, web search) run directly on the Brain
             return await tool.execute(args, context);
-        } catch (error) {
+        } catch (error: any) {
             return {
                 success: false,
                 output: '',
-                error:
-                    error instanceof Error
-                        ? error.message
-                        : 'Unknown tool execution error.',
+                error: error.name === 'NodeDisconnectError' ? `NodeDisconnectError: ${error.message}` : (error.message || String(error)),
             };
         }
     }

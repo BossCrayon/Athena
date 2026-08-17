@@ -7,9 +7,10 @@ export const getBatteryLevelTool: Tool = {
         permission: 'safe',
         schema: {
             name: 'get_battery_level',
-            description: 'Get the current battery percentage and charging status of the connected mobile phone.',
-            parameters: [],
-        }
+            description: 'Retrieves the current battery level of the mobile device. Works only on mobile.',
+            parameters: []
+        },
+        isParallelizable: true
     },
     execute: async () => {
         // This is a proxy tool. The Cloud Brain will route it to the mobile node.

@@ -71,12 +71,34 @@ export class GeminiProvider implements LLMProvider {
                 (m) => m.role !== 'system'
             );
 
-            const conversationText = userMessages
-                .map(
-                    (m) =>
-                        `${m.role.toUpperCase()}: ${m.content}`
-                )
-                .join('\n\n');
+            const input: any[] = [];
+            for (const m of userMessages) {
+                if (typeof m.content === 'string') {
+                    input.push({ type: 'text', text: `${m.role.toUpperCase()}: ${m.content}` });
+                } else {
+                    let prefixAdded = false;
+                    for (const part of m.content) {
+                        if (part.type === 'text') {
+                            input.push({
+                                type: 'text',
+                                text: !prefixAdded ? `${m.role.toUpperCase()}: ${part.text}` : part.text
+                            });
+                            prefixAdded = true;
+                        } else if (part.type === 'image' || part.type === 'document') {
+                            if (!prefixAdded) {
+                                input.push({ type: 'text', text: `${m.role.toUpperCase()}:\n` });
+                                prefixAdded = true;
+                            }
+                            input.push({
+                                type: part.type,
+                                mime_type: part.mimeType,
+                                ...(part.data ? { data: part.data } : {}),
+                                ...(part.uri ? { uri: part.uri } : {})
+                            });
+                        }
+                    }
+                }
+            }
 
             const toolDeclarations = tools?.map((tool) => {
                 const properties: Record<string, unknown> = {};
@@ -110,11 +132,13 @@ export class GeminiProvider implements LLMProvider {
 
                 ...(systemMessage?.content
                     ? {
-                        system_instruction: systemMessage.content,
+                        system_instruction: typeof systemMessage.content === 'string' 
+                            ? systemMessage.content 
+                            : systemMessage.content.filter(p => p.type === 'text').map((p: any) => p.text).join('\n'),
                     }
                     : {}),
 
-                input: conversationText,
+                input: input,
 
                 ...(toolDeclarations
                     ? {
@@ -129,6 +153,9 @@ export class GeminiProvider implements LLMProvider {
             let continuationId = '';
 
             for await (const event of interactionStream) {
+                if (options?.signal?.aborted) {
+                    throw new Error('AbortError');
+                }
                 if (event.event_type === 'interaction.created') {
                     continuationId = event.interaction.id;
                 } else if (
@@ -213,13 +240,31 @@ export class GeminiProvider implements LLMProvider {
                 parsedOutput = { output: result.output };
             }
 
-            return {
+            const steps: any[] = [{
                 type: 'function_result' as const,
                 name: result.toolName,
                 call_id: result.toolCallId,
-                result: { output: result.output },
-            };
-        });
+                result: parsedOutput,
+            }];
+            
+            if (result.attachments && result.attachments.length > 0) {
+                steps.push({
+                    type: 'user_input' as const,
+                    content: result.attachments.map((att) => {
+                        if (att.type === 'text') {
+                            return { type: 'text', text: att.text };
+                        }
+                        return {
+                            type: att.type,
+                            mime_type: (att as any).mimeType,
+                            ...((att as any).data ? { data: (att as any).data } : {}),
+                            ...((att as any).uri ? { uri: (att as any).uri } : {})
+                        };
+                    })
+                });
+            }
+            return steps;
+        }).flat();
 
         const interactionStream =
             await this.ai.interactions.create({
@@ -242,6 +287,9 @@ export class GeminiProvider implements LLMProvider {
         let newContinuationId = continuationId;
 
         for await (const event of interactionStream) {
+            if (options?.signal?.aborted) {
+                throw new Error('AbortError');
+            }
             if (event.event_type === 'interaction.created') {
                 newContinuationId = event.interaction.id;
             } else if (
