@@ -60,35 +60,15 @@ async function setupAthena(nodeManager: NodeManager, eventBus: EventBus) {
     const fallbackOrder: string[] = [];
 
     if (process.env.GEMINI_API_KEY) {
-        // Pro models
-        router.registerProvider('gemini-3.1-pro', new GeminiProvider('gemini-3.1-pro'));
-        router.registerProvider('gemini-2.5-pro', new GeminiProvider('gemini-2.5-pro'));
-        
-        // Flash models
-        router.registerProvider('gemini-3.7-flash', new GeminiProvider('gemini-3.7-flash'));
-        router.registerProvider('gemini-3.6-flash', new GeminiProvider('gemini-3.6-flash'));
-        router.registerProvider('gemini-3.5-flash', new GeminiProvider('gemini-3.5-flash'));
-        router.registerProvider('gemini-3-flash', new GeminiProvider('gemini-3-flash'));
-        router.registerProvider('gemini-2.5-flash', new GeminiProvider('gemini-2.5-flash'));
-        
-        // Lite models
+        // Lite models (These are the only ones with active API quota)
         router.registerProvider('gemini-3.5-flash-lite', new GeminiProvider('gemini-3.5-flash-lite'));
         router.registerProvider('gemini-3.1-flash-lite', new GeminiProvider('gemini-3.1-flash-lite'));
-        router.registerProvider('gemini-2.5-flash-lite', new GeminiProvider('gemini-2.5-flash-lite'));
         
-        router.setDefaultProvider('gemini-3.7-flash');
+        router.setDefaultProvider('gemini-3.1-flash-lite');
         
         fallbackOrder.push(
-            'gemini-3.7-flash',
-            'gemini-3.6-flash',
-            'gemini-3.5-flash',
-            'gemini-3-flash',
-            'gemini-2.5-flash',
-            'gemini-3.1-pro',
-            'gemini-2.5-pro',
-            'gemini-3.5-flash-lite',
             'gemini-3.1-flash-lite',
-            'gemini-2.5-flash-lite'
+            'gemini-3.5-flash-lite'
         );
     }
     if (process.env.OPENROUTER_API_KEY) {
