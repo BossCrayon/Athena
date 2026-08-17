@@ -91,7 +91,7 @@ export const systemControlTool: Tool = {
             }
 
             else if (action === 'lock_system') {
-                const cmd = 'rundll32.exe user32.dll,LockWorkStation';
+                const cmd = 'powershell -Command "Start-Process rundll32.exe -ArgumentList \'user32.dll,LockWorkStation\'"';
                 await execAsync(cmd);
                 return { success: true, output: 'Successfully locked the workstation.' };
             }

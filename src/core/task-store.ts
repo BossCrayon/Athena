@@ -6,7 +6,8 @@ export class TaskStore {
 
     constructor() {
         const supabaseUrl = process.env.SUPABASE_URL;
-        const supabaseKey = process.env.SUPABASE_ANON_KEY;
+        // Prioritize Service Role Key to bypass RLS for backend operations
+        const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
         
         if (supabaseUrl && supabaseKey) {
             this.supabase = createClient(supabaseUrl, supabaseKey);
