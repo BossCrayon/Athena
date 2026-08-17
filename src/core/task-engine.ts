@@ -74,7 +74,8 @@ export class TaskEngine {
             'research', 'find all', 'compare', 'search for', 'fetch', 'download',
             'create a file', 'write a file', 'run a command', 'execute', 'schedule',
             'remind me', 'set a timer', 'autonomous', 'do this for me', 'background task',
-            'take a screenshot', 'capture', 'open', 'close', 'install', 'analyze'
+            'take a screenshot', 'capture', 'open', 'close', 'install', 'analyze',
+            'run ', 'start ', 'launch ', 'stop ', 'restart ', 'build ', 'deploy '
         ];
         const lower = trimmed.toLowerCase();
         if (planningKeywords.some(kw => lower.includes(kw))) return false;
