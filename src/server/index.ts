@@ -317,21 +317,27 @@ fastify.register(async function (app) {
             connection.close();
             return;
         }
+        let deviceRole: 'admin' | 'user' = 'user';
 
-        const { data: device, error } = await supabase
-            .from('auth_devices')
-            .select('*')
-            .eq('token', token)
-            .single();
+        // Local development bypass: allow the hardcoded env token as admin
+        if (token === process.env.NODE_AUTH_TOKEN && process.env.NODE_AUTH_TOKEN) {
+            deviceRole = 'admin';
+        } else {
+            const { data: device, error } = await supabase
+                .from('auth_devices')
+                .select('*')
+                .eq('token', token)
+                .single();
 
-        if (error || !device) {
-            connection.send(JSON.stringify({ type: 'token', text: 'Error: Invalid device token.' }));
-            connection.close();
-            return;
+            if (error || !device) {
+                connection.send(JSON.stringify({ type: 'token', text: 'Error: Invalid device token.' }));
+                connection.close();
+                return;
+            }
+            deviceRole = device.role;
+            // Update last seen
+            supabase.from('auth_devices').update({ last_seen_at: new Date().toISOString() }).eq('token', token).then();
         }
-
-        // Update last seen
-        supabase.from('auth_devices').update({ last_seen_at: new Date().toISOString() }).eq('token', token).then();
 
         connection.on('message', async (message: string) => {
             try {
@@ -355,7 +361,7 @@ fastify.register(async function (app) {
                         (toolName) => {
                             connection.send(JSON.stringify({ type: 'tool', tool: toolName }));
                         },
-                        device.role // Pass role to restrict tools
+                        deviceRole // Pass role to restrict tools
                     );
                     connection.send(JSON.stringify({ type: 'done' }));
                 }
