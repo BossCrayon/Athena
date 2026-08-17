@@ -194,7 +194,7 @@ fastify.register(async function (app) {
         }
         return res.send({
             status: 'ok',
-            workerId: autonomousRuntime.workerId,
+            workerId: autonomousRuntime.workerName,
             runtime: autonomousRuntime.getIsRunning() ? 'running' : 'stopped',
             activeTasks: autonomousRuntime.getActiveTaskCount()
         });
@@ -224,7 +224,7 @@ fastify.register(async function (app) {
 
         return res.send({
             status: 'ready',
-            workerId: autonomousRuntime.workerId
+            workerId: autonomousRuntime.workerName
         });
     });
 

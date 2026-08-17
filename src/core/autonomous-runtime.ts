@@ -18,6 +18,7 @@ export class AutonomousRuntime {
     private heartbeatIntervalId: NodeJS.Timeout | null = null;
     
     public readonly workerId: string;
+    public readonly workerName: string;
     private activeTasks = new Map<string, Task>();
     private activeControllers = new Map<string, AbortController>();
     private readonly LEASE_TIMEOUT_MS = parseInt(process.env.TASK_LEASE_TIMEOUT_MS || '120000', 10); // 2 minutes default
@@ -31,7 +32,8 @@ export class AutonomousRuntime {
         private readonly memoryManager: CloudMemoryManager,
         private readonly taskStore?: TaskStore
     ) {
-        this.workerId = `athena-worker-${randomUUID()}`;
+        this.workerId = randomUUID(); // plain UUID — required by claimed_by UUID column
+        this.workerName = `athena-worker-${this.workerId.substring(0, 8)}`; // human-readable label
         
         // Listen for cancellation
         this.eventBus.subscribe('task_cancellation_requested', (payload: { taskId: string }) => {
