@@ -34,7 +34,7 @@ import { getLocationTool } from '../tools/get-location.js';
 
 dotenv.config();
 
-const fastify = Fastify({ logger: true });
+const fastify = Fastify({ logger: true, pluginTimeout: 60000 });
 fastify.register(cors, { origin: true });
 fastify.register(websocket);
 
