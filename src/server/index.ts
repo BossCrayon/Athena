@@ -290,7 +290,7 @@ fastify.register(async function (app) {
     app.get('/nodes', { websocket: true }, (connection, req) => {
         connection.on('message', message => {
             try {
-                const data = JSON.parse(message as string);
+                const data = JSON.parse(message.toString());
                 if (data.type === 'node_register') {
                     const nodeType = data.nodeType || 'laptop';
                     nodeManager.registerNode(
