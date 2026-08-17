@@ -90,10 +90,13 @@ export const fetchUrlTool: Tool = {
                 output: JSON.stringify([observation]),
             };
         } catch (error) {
+            const errMsg = error instanceof Error ? error.message : 'Unknown error fetching URL.';
+            // Preserve SSRF block errors with a clear prefix for telemetry classification
+            const isBlocked = errMsg.toLowerCase().includes('ssrf blocked') || errMsg.toLowerCase().includes('unsupported protocol');
             return {
                 success: false,
                 output: '',
-                error: error instanceof Error ? error.message : 'Unknown error fetching URL.',
+                error: isBlocked ? `[URL Blocked] ${errMsg}` : errMsg,
             };
         }
     },

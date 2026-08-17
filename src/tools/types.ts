@@ -1,4 +1,6 @@
 import type { ToolSchema } from './schema.js';
+import type { Task, TaskStep } from '../core/task.js';
+import type { MessageContentPart } from '../llm/types.js';
 
 export type ToolPermission =
     | 'safe'
@@ -9,10 +11,9 @@ export interface ToolDefinition {
     name: string;
     description: string;
     permission: ToolPermission;
+    schema: ToolSchema;
     isParallelizable?: boolean;
 }
-
-import type { Task, TaskStep } from '../core/task.js';
 
 export interface ToolContext {
     cwd: string;
@@ -26,6 +27,7 @@ export interface ToolResult {
     success: boolean;
     output: string;
     error?: string;
+    attachments?: MessageContentPart[];
 }
 
 export interface Tool {
@@ -35,12 +37,4 @@ export interface Tool {
         args: Record<string, unknown>,
         context: ToolContext
     ): Promise<ToolResult>;
-}
-
-export interface ToolDefinition {
-    name: string;
-    description: string;
-    permission: ToolPermission;
-    schema: ToolSchema;
-    isParallelizable?: boolean;
 }

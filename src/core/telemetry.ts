@@ -77,14 +77,24 @@ export function classifyError(error: any): string {
 
     if (errStr === 'aborterror') return 'task_cancelled';
     if (error.name === 'NodeDisconnectError') return 'node_disconnected';
+    if (errStr.includes('ssrf blocked') || errStr.includes('private/internal ip') || errStr.includes('unsupported protocol')) return 'url_blocked';
     if (status === 429 || errStr.includes('429') || errStr.includes('quota') || errStr.includes('rate limit') || errStr.includes('retry in')) return 'provider_rate_limited';
     if (status === 401 || status === 403 || errStr.includes('unauthorized') || errStr.includes('authentication')) return 'provider_authentication';
+    if (errStr.includes('timed out') || errStr.includes('time out')) {
+        if (errStr.includes('external') || errStr.includes('request')) return 'external_timeout';
+        if (errStr.includes('tool')) return 'tool_timeout';
+        if (errStr.includes('node')) return 'node_timeout';
+        if (errStr.includes('provider')) return 'provider_timeout';
+        return 'task_timeout';
+    }
     if (errStr.includes('timeout')) {
         if (errStr.includes('tool')) return 'tool_timeout';
         if (errStr.includes('node')) return 'node_timeout';
         if (errStr.includes('provider')) return 'provider_timeout';
         return 'task_timeout';
     }
+    if (errStr.includes('exceeded maximum size')) return 'response_too_large';
+    if (errStr.includes('exceeded maximum redirect')) return 'too_many_redirects';
     if (errStr.includes('permission denied')) return 'permission_denied';
     if (errStr.includes('memory')) return 'memory_failure';
     if (errStr.includes('supabase') || errStr.includes('postgres')) return 'persistence_failure';

@@ -1,6 +1,6 @@
 import { tavily } from '@tavily/core';
-import type { Tool } from './types.js';
-import type { SearchResult, ExternalObservation } from '../core/external.js';
+import type { Tool, ToolContext } from './types.js';
+import type { ExternalObservation, SearchResult } from '../core/external.js';
 
 export const webSearchTool: Tool = {
     definition: {
@@ -19,86 +19,80 @@ export const webSearchTool: Tool = {
                 },
             ],
         },
-        },
-        isParallelizable: true
+        isParallelizable: true,
     },
 
-    async execute(args: Record<string, unknown>) {
-        const query = args.query as string;
+    async execute(args: Record<string, unknown>, context: ToolContext) {
+        const query = typeof args.query === 'string' ? args.query.trim() : '';
+
         if (!query) {
-            return {
-                success: false,
-                output: '',
-                error: 'Search query is required.',
-            };
+            return { success: false, output: '', error: 'Search query is required.' };
         }
 
         const apiKey = process.env.TAVILY_API_KEY;
         if (!apiKey) {
-            return {
-                success: false,
-                output: '',
-                error: 'TAVILY_API_KEY is not set in the environment.',
-            };
+            return { success: false, output: '', error: 'TAVILY_API_KEY is not set in the environment.' };
         }
 
         try {
-            const tvly = tavily({ apiKey });
-            
-            // Perform an advanced search
-            const response = await tvly.search(query, {
+            const client = tavily({ apiKey });
+            const response = await client.search(query, {
                 searchDepth: 'advanced',
                 maxResults: 5,
                 includeAnswer: true,
             });
-            
-            let observations: ExternalObservation[] = [];
 
+            const results: SearchResult[] = (response.results || []).map((res) => {
+                let domain = '';
+                try { domain = new URL(res.url).hostname; } catch {}
+
+                return {
+                    title: res.title ?? '',
+                    url: res.url ?? '',
+                    domain,
+                    snippet: res.content ?? '',
+                    publishedAt: typeof (res as any).publishedDate === 'string'
+                        ? (res as any).publishedDate
+                        : undefined,
+                    relevance: typeof (res as any).score === 'number'
+                        ? (res as any).score
+                        : undefined,
+                    sourceType: 'unknown' as const,
+                };
+            });
+
+            const observations: ExternalObservation[] = results.map((r) => ({
+                content: r.snippet,
+                title: r.title,
+                snippet: r.snippet,
+                source: {
+                    url: r.url,
+                    domain: r.domain,
+                    retrievedAt: Date.now(),
+                    publishedAt: r.publishedAt ? new Date(r.publishedAt).getTime() : undefined,
+                    sourceType: r.sourceType,
+                },
+            }));
+
+            // Add AI answer if present
             if (response.answer) {
-                observations.push({
+                observations.unshift({
                     content: response.answer,
-                    source: {
-                        url: 'https://tavily.com',
-                        domain: 'tavily.com',
-                        retrievedAt: Date.now(),
-                        sourceType: 'unknown'
-                    },
+                    title: `AI Summary for: ${query}`,
+                    source: { url: 'https://tavily.com', domain: 'tavily.com', retrievedAt: Date.now(), sourceType: 'unknown' },
                     confidence: 'medium',
-                    title: `AI Summary for: ${query}`
                 });
-            }
-
-            if (response.results && response.results.length > 0) {
-                for (const res of response.results) {
-                    let domain = '';
-                    try {
-                        domain = new URL(res.url).hostname;
-                    } catch {}
-                    
-                    observations.push({
-                        content: res.content,
-                        source: {
-                            url: res.url,
-                            domain,
-                            retrievedAt: Date.now(),
-                            sourceType: 'unknown',
-                            publishedAt: undefined // Tavily advanced might not return this standardly, leave undefined
-                        },
-                        title: res.title,
-                        snippet: res.content.substring(0, 500)
-                    });
-                }
             }
 
             return {
                 success: true,
-                output: JSON.stringify(observations),
+                output: JSON.stringify(observations, null, 2),
             };
         } catch (error) {
             return {
                 success: false,
                 output: '',
-                error: error instanceof Error ? error.message : 'Unknown error during web search.',
+                error: error instanceof Error ? error.message : 'Unknown web search error.',
             };
         }
     },
