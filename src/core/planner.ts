@@ -115,8 +115,12 @@ Rules:
 
         let cleanText = response.text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
 
-        const jsonMatch = cleanText.match(/```(?:json)?\n([\s\S]*?)\n```/);
-        const jsonText = jsonMatch ? jsonMatch[1] : cleanText;
+        let jsonText = cleanText;
+        const firstBrace = cleanText.indexOf('{');
+        const lastBrace = cleanText.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace !== -1) {
+            jsonText = cleanText.substring(firstBrace, lastBrace + 1);
+        }
         
         let plan: TaskPlan;
         try {
@@ -169,8 +173,12 @@ Rules:
         if (!response.text) throw new Error('Replanner failed to generate a response.');
         
         const cleanText = response.text.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
-        const jsonMatch = cleanText.match(/```(?:json)?\n([\s\S]*?)\n```/);
-        const jsonText = jsonMatch ? jsonMatch[1] : cleanText;
+        let jsonText = cleanText;
+        const firstBrace = cleanText.indexOf('{');
+        const lastBrace = cleanText.lastIndexOf('}');
+        if (firstBrace !== -1 && lastBrace !== -1) {
+            jsonText = cleanText.substring(firstBrace, lastBrace + 1);
+        }
         
         let plan: TaskPlan;
         try {
