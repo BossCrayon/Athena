@@ -83,12 +83,15 @@ async function setupAthena(nodeManager: NodeManager, eventBus: EventBus) {
 
     // Fast router: lightweight model used exclusively for Planner JSON generation
     // and simple conversational fast-path routing. Much lower latency.
-    let fastRouter: LLMRouter | undefined;
+    let fastRouter: LLMRouter | undefined = new LLMRouter(eventBus);
     if (process.env.GEMINI_API_KEY) {
-        fastRouter = new LLMRouter(eventBus);
         fastRouter.registerProvider('gemini-3.1-flash-lite', new GeminiProvider('gemini-3.1-flash-lite'));
         fastRouter.setDefaultProvider('gemini-3.1-flash-lite');
         fastRouter.setFallbackProviders(['gemini-3.1-flash-lite']);
+    } else {
+        fastRouter.registerProvider('ollama', new OllamaProvider());
+        fastRouter.setDefaultProvider('ollama');
+        fastRouter.setFallbackProviders(['ollama']);
     }
 
     const toolRegistry = new ToolRegistry();

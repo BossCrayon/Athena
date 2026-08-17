@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import type {
     GenerationOptions,
     LLMProvider,
@@ -14,22 +15,55 @@ export class OllamaProvider implements LLMProvider {
     private readonly model: string;
     private readonly baseUrl: string;
 
-    constructor(modelName: string = 'llama3', baseUrl: string = 'http://localhost:11434') {
-        this.model = modelName;
-        this.baseUrl = baseUrl;
+    constructor(modelName: string = 'llama3.2', baseUrl: string = 'http://127.0.0.1:11434') {
+        this.baseUrl = process.env.OLLAMA_HOST || baseUrl;
+        this.model = process.env.OLLAMA_MODEL || modelName;
     }
 
     getMetadata(): ProviderMetadata {
         return {
             name: `ollama (${this.model})`,
             capabilities: {
-                tools: false, // Most Ollama models don't support tools out of the box effectively yet
+                tools: true,
                 vision: false,
                 streaming: true,
+                localOnly: true,
             },
-            cost: 'low', // Local inference is free
+            cost: 'low',
             latency: 'medium',
         };
+    }
+
+    private formatOllamaMessages(messages: Message[]): any[] {
+        return messages.map(m => {
+            const contentString = typeof m.content === 'string' 
+                ? m.content 
+                : m.content.map(p => p.type === 'text' ? p.text : '[Unsupported Image Data]').join('\n');
+            
+            if (m.role === 'user' && contentString.startsWith('[TOOL RESULT:')) {
+                 return {
+                     role: 'tool',
+                     content: contentString
+                 };
+            }
+
+            return {
+                role: m.role === 'model' ? 'assistant' : m.role,
+                content: contentString,
+            };
+        });
+    }
+
+    private formatOllamaTools(tools?: ToolSchema[]): any[] | undefined {
+        if (!tools || tools.length === 0) return undefined;
+        return tools.map(t => ({
+            type: 'function',
+            function: {
+                name: t.name,
+                description: t.description,
+                parameters: t.parameters || { type: 'object', properties: {} }
+            }
+        }));
     }
 
     async generate(
@@ -37,21 +71,16 @@ export class OllamaProvider implements LLMProvider {
         options?: GenerationOptions,
         tools?: ToolSchema[]
     ): Promise<LLMResponse> {
-        if (tools && tools.length > 0) {
-            console.warn(`[OllamaProvider] Tools were provided but are not supported by this provider.`);
+        
+        const ollamaMessages = this.formatOllamaMessages(messages);
+        if (options?.systemPrompt) {
+            ollamaMessages.unshift({ role: 'system', content: options.systemPrompt });
         }
 
         const requestBody = {
             model: this.model,
-            messages: messages.map(m => {
-                const contentString = typeof m.content === 'string' 
-                    ? m.content 
-                    : m.content.map(p => p.type === 'text' ? p.text : '[Unsupported Image Data]').join('\n');
-                return {
-                    role: m.role,
-                    content: contentString,
-                };
-            }),
+            messages: ollamaMessages,
+            tools: this.formatOllamaTools(tools),
             stream: true,
             options: {
                 temperature: options?.temperature ?? 0.7,
@@ -79,6 +108,7 @@ export class OllamaProvider implements LLMProvider {
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let fullText = '';
+        const toolCalls: ToolCall[] = [];
 
         try {
             while (true) {
@@ -91,6 +121,17 @@ export class OllamaProvider implements LLMProvider {
                 for (const line of lines) {
                     try {
                         const parsed = JSON.parse(line);
+                        
+                        if (parsed.message?.tool_calls) {
+                            for (const tc of parsed.message.tool_calls) {
+                                toolCalls.push({
+                                    id: randomUUID(),
+                                    name: tc.function.name,
+                                    arguments: tc.function.arguments || {}
+                                });
+                            }
+                        }
+
                         if (parsed.message?.content) {
                             fullText += parsed.message.content;
                             options?.onToken?.(parsed.message.content);
@@ -104,8 +145,18 @@ export class OllamaProvider implements LLMProvider {
             reader.releaseLock();
         }
 
+        const continuationHistory = [...messages];
+        if (fullText || toolCalls.length > 0) {
+             continuationHistory.push({ 
+                 role: 'model', 
+                 content: fullText 
+             });
+        }
+        
         return {
             text: fullText,
+            toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+            continuationId: toolCalls.length > 0 ? JSON.stringify(continuationHistory) : undefined
         };
     }
 
@@ -116,6 +167,21 @@ export class OllamaProvider implements LLMProvider {
         options?: GenerationOptions,
         tools?: ToolSchema[]
     ): Promise<LLMResponse> {
-        throw new Error('continueWithToolResults is not supported by OllamaProvider.');
+        
+        let history: Message[] = [];
+        try {
+            history = JSON.parse(continuationId);
+        } catch(e) {
+            history = messages;
+        }
+        
+        for (const res of results) {
+            history.push({
+                role: 'user', 
+                content: `[TOOL RESULT: ${res.toolName}]\n${res.output}\n${res.error ? `Error: ${res.error}` : ''}`
+            });
+        }
+
+        return this.generate(history, options, tools);
     }
 }
