@@ -9,11 +9,13 @@ import * as dotenv from 'dotenv';
 dotenv.config();
 
 const SERVER_URL = process.env.ATHENA_CLIENT_URL || 'ws://localhost:3000/chat';
+const AUTH_TOKEN = process.env.NODE_AUTH_TOKEN || '';
 
 async function main() {
     console.log(`[System] Connecting to ATHENA Server (${SERVER_URL})...`);
 
-    const ws = new WebSocket(SERVER_URL);
+    const wsUrl = AUTH_TOKEN ? `${SERVER_URL}?token=${encodeURIComponent(AUTH_TOKEN)}` : SERVER_URL;
+    const ws = new WebSocket(wsUrl);
     
     let isWaitingForResponse = false;
     let isFirstToken = false;
