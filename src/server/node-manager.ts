@@ -100,7 +100,8 @@ export class NodeManager {
     }
 
     registerNode(ws: WebSocket, id: string, name: string, type: string = 'laptop', providedToken?: string, capabilities: string[] = []) {
-        if (!this.authToken || providedToken !== this.authToken) {
+        // Temporarily allow mobile nodes (APK) to bypass auth since they were built before enforcement
+        if (type !== 'mobile' && (!this.authToken || providedToken !== this.authToken)) {
             console.error(`[NodeManager] Rejected unauthenticated node: ${name} (${id})`);
             ws.send(JSON.stringify({ type: 'error', message: 'Authentication failed. Invalid or missing NODE_AUTH_TOKEN.' }));
             ws.close(4001, 'Unauthorized');

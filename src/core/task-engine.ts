@@ -75,9 +75,9 @@ export class TaskEngine {
         } else {
             // Tier 2: Semantic Router (KNN Local Embedding, <20ms)
             const router = SemanticRouter.getInstance();
-            const classification = await router.classifyIntent(userInput, 0.80);
+            const classification = await router.classifyIntent(userInput, 0.55);
             
-            if (classification.confidence >= 0.80) {
+            if (classification.confidence >= 0.55) {
                 isTask = classification.route === 'task';
             } else {
                 // Tier 3: LLM Fallback (Ambiguous, assume task or route to fast path and let it escalate)
