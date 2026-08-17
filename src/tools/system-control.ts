@@ -91,7 +91,7 @@ export const systemControlTool: Tool = {
 
                 if (isUrl) {
                     // Open URL in the default browser — most reliable on Windows
-                    cmd = `powershell -Command "Start-Process '${normalizedTarget}'"` ;
+                    cmd = `powershell -Command "Start-Process '${normalizedTarget}' -WindowStyle Normal"` ;
                 } else {
                     // Map common friendly names to real executables
                     const appMap: Record<string, string> = {
@@ -108,9 +108,9 @@ export const systemControlTool: Tool = {
                     };
                     const resolved = appMap[target.toLowerCase()] || target;
                     const resolvedIsUrl = resolved.startsWith('http');
-                    cmd = `powershell -Command "Start-Process '${resolved}'"` ;
+                    cmd = `powershell -Command "Start-Process '${resolved}' -WindowStyle Normal"` ;
                     if (resolvedIsUrl) {
-                        cmd = `powershell -Command "Start-Process '${resolved}'"` ;
+                        cmd = `powershell -Command "Start-Process '${resolved}' -WindowStyle Normal"` ;
                     }
                 }
 
