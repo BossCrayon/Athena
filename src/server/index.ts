@@ -287,13 +287,20 @@ fastify.register(async function (app) {
         });
     });
 
-    app.get('/nodes', { websocket: true }, (connection: any, req) => {
-        connection.on('message', (message: string) => {
+    app.get('/nodes', { websocket: true }, (connection, req) => {
+        connection.on('message', message => {
             try {
-                const data = JSON.parse(message);
+                const data = JSON.parse(message as string);
                 if (data.type === 'node_register') {
                     const nodeType = data.nodeType || 'laptop';
-                    nodeManager.registerNode(connection, data.id, data.name, nodeType, data.token);
+                    nodeManager.registerNode(
+                        connection, 
+                        data.id, 
+                        data.name, 
+                        nodeType, 
+                        data.token,
+                        data.capabilities || []
+                    );
                 }
             } catch (err) {
                 console.error('Node WS Error:', err);
