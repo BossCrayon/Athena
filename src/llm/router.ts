@@ -315,6 +315,15 @@ export class LLMRouter {
             try {
                 const provider = this.providers.get(primaryProviderName);
                 if (provider) {
+                    if (this.eventBus) {
+                        this.eventBus.emit('telemetry', {
+                            eventType: 'provider_selected',
+                            timestamp: new Date().toISOString(),
+                            provider: primaryProviderName
+                        });
+                    }
+                    const startMs = Date.now();
+                    
                     const continuePromise = provider.continueWithToolResults(
                         continuationId,
                         results,
@@ -338,6 +347,14 @@ export class LLMRouter {
                         result = await continuePromise;
                     }
                     
+                    if (this.eventBus) {
+                        this.eventBus.emit('telemetry', {
+                            eventType: 'provider_completed',
+                            timestamp: new Date().toISOString(),
+                            provider: primaryProviderName,
+                            durationMs: Date.now() - startMs
+                        });
+                    }
                     this.handleProviderSuccess(primaryProviderName);
                     return result;
                 }

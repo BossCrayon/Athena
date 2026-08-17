@@ -79,6 +79,10 @@ export class CloudMemoryManager {
         if (!this.supabase) return [];
         
         try {
+            if (!process.env.GEMINI_API_KEY) {
+                console.warn('[Memory] Offline mode: Skipping memory search.');
+                return [];
+            }
             const limit = options.maxMemories || 5;
             const threshold = options.minimumRelevance || 0.6;
             const embedding = await generateEmbedding(query);

@@ -14,6 +14,7 @@ import type { ToolSchema } from '../../tools/schema.js';
 export class OllamaProvider implements LLMProvider {
     private readonly model: string;
     private readonly baseUrl: string;
+    private sessions = new Map<string, any[]>();
 
     constructor(modelName: string = 'llama3.2', baseUrl: string = 'http://127.0.0.1:11434') {
         this.baseUrl = process.env.OLLAMA_HOST || baseUrl;
@@ -56,27 +57,40 @@ export class OllamaProvider implements LLMProvider {
 
     private formatOllamaTools(tools?: ToolSchema[]): any[] | undefined {
         if (!tools || tools.length === 0) return undefined;
-        return tools.map(t => ({
-            type: 'function',
-            function: {
-                name: t.name,
-                description: t.description,
-                parameters: t.parameters || { type: 'object', properties: {} }
+        return tools.map(t => {
+            const properties: Record<string, any> = {};
+            const required: string[] = [];
+
+            if (t.parameters) {
+                for (const p of t.parameters) {
+                    properties[p.name] = {
+                        type: p.type,
+                        description: p.description
+                    };
+                    if (p.required) required.push(p.name);
+                }
             }
-        }));
+
+            return {
+                type: 'function',
+                function: {
+                    name: t.name,
+                    description: t.description,
+                    parameters: {
+                        type: 'object',
+                        properties,
+                        required
+                    }
+                }
+            };
+        });
     }
 
-    async generate(
-        messages: Message[],
+    private async executeRequest(
+        ollamaMessages: any[],
         options?: GenerationOptions,
         tools?: ToolSchema[]
     ): Promise<LLMResponse> {
-        
-        const ollamaMessages = this.formatOllamaMessages(messages);
-        if (options?.systemPrompt) {
-            ollamaMessages.unshift({ role: 'system', content: options.systemPrompt });
-        }
-
         const requestBody = {
             model: this.model,
             messages: ollamaMessages,
@@ -90,9 +104,7 @@ export class OllamaProvider implements LLMProvider {
 
         const response = await fetch(`${this.baseUrl}/api/chat`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(requestBody),
         });
 
@@ -101,14 +113,13 @@ export class OllamaProvider implements LLMProvider {
             throw new Error(`Ollama API error: ${response.status} - ${errorText}`);
         }
 
-        if (!response.body) {
-            throw new Error('Ollama returned empty body');
-        }
+        if (!response.body) throw new Error('Ollama returned empty body');
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let fullText = '';
         const toolCalls: ToolCall[] = [];
+        const rawToolCalls: any[] = [];
 
         try {
             while (true) {
@@ -124,6 +135,7 @@ export class OllamaProvider implements LLMProvider {
                         
                         if (parsed.message?.tool_calls) {
                             for (const tc of parsed.message.tool_calls) {
+                                rawToolCalls.push(tc);
                                 toolCalls.push({
                                     id: randomUUID(),
                                     name: tc.function.name,
@@ -145,19 +157,34 @@ export class OllamaProvider implements LLMProvider {
             reader.releaseLock();
         }
 
-        const continuationHistory = [...messages];
-        if (fullText || toolCalls.length > 0) {
-             continuationHistory.push({ 
-                 role: 'model', 
-                 content: fullText 
-             });
+        let continuationId: string | undefined;
+        if (fullText || rawToolCalls.length > 0) {
+            ollamaMessages.push({
+                role: 'assistant',
+                content: fullText,
+                ...(rawToolCalls.length > 0 ? { tool_calls: rawToolCalls } : {})
+            });
+            continuationId = randomUUID();
+            this.sessions.set(continuationId, ollamaMessages);
         }
         
         return {
             text: fullText,
             toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-            continuationId: toolCalls.length > 0 ? JSON.stringify(continuationHistory) : undefined
+            continuationId
         };
+    }
+
+    async generate(
+        messages: Message[],
+        options?: GenerationOptions,
+        tools?: ToolSchema[]
+    ): Promise<LLMResponse> {
+        const ollamaMessages = this.formatOllamaMessages(messages);
+        if (options?.systemPrompt) {
+            ollamaMessages.unshift({ role: 'system', content: options.systemPrompt });
+        }
+        return this.executeRequest(ollamaMessages, options, tools);
     }
 
     async continueWithToolResults(
@@ -167,21 +194,18 @@ export class OllamaProvider implements LLMProvider {
         options?: GenerationOptions,
         tools?: ToolSchema[]
     ): Promise<LLMResponse> {
-        
-        let history: Message[] = [];
-        try {
-            history = JSON.parse(continuationId);
-        } catch(e) {
-            history = messages;
+        const history = this.sessions.get(continuationId);
+        if (!history) {
+            throw new Error(`Expired continuation ID: ${continuationId}`);
         }
         
         for (const res of results) {
             history.push({
-                role: 'user', 
+                role: 'tool', 
                 content: `[TOOL RESULT: ${res.toolName}]\n${res.output}\n${res.error ? `Error: ${res.error}` : ''}`
             });
         }
 
-        return this.generate(history, options, tools);
+        return this.executeRequest(history, options, tools);
     }
 }

@@ -239,7 +239,7 @@ export class TaskEngine {
         // K5: Explicit Planning Phase
         if (!task.plan || task.status === 'planning') {
             const planStart = Date.now();
-            task.plan = await this.planner.createPlan(task);
+            task.plan = await this.planner.createPlan(task, history);
             task.telemetry.llmGenerationMs! += (Date.now() - planStart);
             task.status = 'executing';
 
@@ -418,14 +418,21 @@ export class TaskEngine {
         }
 
         // Summarize completion for user
-        const finalPrompt = `The task goal "${task.plan?.goal}" has been completed successfully across ${task.plan?.subgoals.length} subgoals.\n\nSummarize the final result clearly for the user based on the history.`;
+        const completedSteps = task.steps?.filter(s => s.status === 'success') || [];
+        const resultsContext = completedSteps.length > 0 
+            ? `\n\nTool Results:\n${completedSteps.map(s => `[${s.toolName}]: ${s.observation}`).join('\n')}` 
+            : '';
+            
+        const finalPrompt = `The task goal "${task.plan?.goal}" has been completed successfully across ${task.plan?.subgoals.length} subgoals.${resultsContext}\n\nSummarize the final result clearly for the user based on the history and tool results.`;
         const finalMessages = [...history, { role: 'user' as const, content: finalPrompt }];
         const response = await this.router.generate(finalMessages, {
             temperature: 0.3,
             routing: { intent: { fastResponse: true } }
         });
 
-        let finalResponseText = response.text || "Task completed successfully.";
+        const rawText = response.text || "Task completed successfully.";
+        let finalResponseText = rawText.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+        if (!finalResponseText) finalResponseText = "Task completed successfully.";
         if (routingOptions.onToken) routingOptions.onToken(finalResponseText);
 
         return finalResponseText;
@@ -658,13 +665,18 @@ Verification Strategy: ${subgoal.verificationStrategy}
 
 Review the tool outputs and history. Has the subgoal been successfully verified?
 Reply with ONLY ONE WORD: "VERIFIED", "UNCERTAIN", or "FAILED".
-If FAILED or UNCERTAIN, follow it with a short explanation on the next line.`;
+If FAILED or UNCERTAIN, follow it with a short explanation on the next line.
+DO NOT use any tools. DO NOT output any XML or JSON. Just reply with the exact word.`;
 
             const vMessages = [...subgoalHistory, { role: 'model' as const, content: response.text || 'Finished tools.' }, { role: 'user' as const, content: verificationPrompt }];
             const vResponse = await this.router.generate(vMessages, { temperature: 0.1, routing: { intent: { reasoning: true } } });
 
-            const vText = vResponse.text?.trim() || '';
-            const statusMatch = vText.match(/^(VERIFIED|UNCERTAIN|FAILED)/i);
+            const vTextRaw = vResponse.text || '';
+            let vText = vTextRaw.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+            vText = vText.replace(/<tool_code>[\s\S]*?<\/tool_code>/g, '').trim();
+            
+            // Match anywhere in the text instead of just the beginning
+            const statusMatch = vText.match(/\b(VERIFIED|UNCERTAIN|FAILED)\b/i);
 
             if (this.eventBus) {
                 this.eventBus.emit('telemetry', {

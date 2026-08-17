@@ -158,10 +158,12 @@ Athena/
 ## Key Systems
 
 ### LLM Router
-Multi-provider routing with intent-aware fallback. Routes to Gemini by default; falls back to OpenRouter or Ollama based on provider health, intent requirements (vision, reasoning, coding, speed), and quota status.
+Multi-provider routing with intent-aware fallback.
+- **Main Router**: Handles complex tool orchestration and task verification. Prioritizes ultra-fast open-source models on Groq (e.g., `gpt-oss-20b`) for millisecond latency, seamlessly falling back to Google Gemini (`flash-lite`) if strict Token-Per-Minute (TPM) limits are exceeded.
+- **Fast Router**: A dedicated lightweight router used exclusively for structured Planner JSON generation and simple conversational routing to minimize Time-To-First-Token (TTFT).
 
 ### Planner (K5)
-LLM-driven structured planner that converts a user goal into a `TaskPlan` — a JSON DAG of `TaskSubgoal` objects with dependencies, requirements, and verification strategies. Replanning is supported when a subgoal fails.
+LLM-driven structured planner that converts a user goal into a `TaskPlan` — a JSON DAG of `TaskSubgoal` objects with dependencies, requirements, and verification strategies. The planner natively ingests the active conversation history to resolve contextual/anaphoric references before DAG generation. Replanning is supported when a subgoal fails.
 
 ### TaskEngine (K1–K5)
 Executes `TaskPlan` subgoals, respecting DAG dependencies. Supports:
@@ -309,7 +311,8 @@ Managed in Supabase (PostgreSQL). Key tables:
 | K5 | Advanced planning, subgoals, DAG, replanning | ✅ Complete |
 | K6 | Multimodal perception (images, screenshots) | ✅ Complete |
 | v0.4.0 | Secure web & external capabilities | ✅ Complete |
-| v0.5.0 | TBD | 🔜 Pending |
+| v0.5.0 | Latency, Fast/Dual Routers, Context-Aware Planning | ✅ Complete |
+| v0.6.0 | TBD | 🔜 Pending |
 
 ---
 

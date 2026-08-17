@@ -61,7 +61,7 @@ export const systemControlTool: Tool = {
             }
 
             else if (action === 'list_apps') {
-                const cmd = 'powershell -Command "Get-Process | Where-Object {$_.MainWindowTitle} | Select-Object Id, ProcessName, MainWindowTitle | ConvertTo-Json"';
+                const cmd = 'powershell -Command "Get-Process | Where-Object MainWindowTitle | Select-Object Id, ProcessName, MainWindowTitle | ConvertTo-Json"';
                 const { stdout } = await execAsync(cmd);
                 if (!stdout || stdout.trim() === '') return { success: true, output: 'No visible applications found.' };
                 return { success: true, output: stdout };

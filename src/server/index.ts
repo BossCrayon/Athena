@@ -7,6 +7,7 @@ import { LLMRouter } from '../llm/router.js';
 import { GeminiProvider } from '../llm/providers/gemini.js';
 import { OpenRouterProvider } from '../llm/providers/openrouter.js';
 import { OllamaProvider } from '../llm/providers/ollama.js';
+import { GroqProvider } from '../llm/providers/groq.js';
 import { ToolRegistry } from '../tools/registry.js';
 import { ToolExecutor } from '../tools/executor.js';
 import { ToolOrchestrator } from '../tools/orchestrator.js';
@@ -64,8 +65,6 @@ async function setupAthena(nodeManager: NodeManager, eventBus: EventBus) {
         router.registerProvider('gemini-3.5-flash-lite', new GeminiProvider('gemini-3.5-flash-lite'));
         router.registerProvider('gemini-3.1-flash-lite', new GeminiProvider('gemini-3.1-flash-lite'));
         
-        router.setDefaultProvider('gemini-3.1-flash-lite');
-        
         fallbackOrder.push(
             'gemini-3.1-flash-lite',
             'gemini-3.5-flash-lite'
@@ -76,23 +75,43 @@ async function setupAthena(nodeManager: NodeManager, eventBus: EventBus) {
         if (!process.env.GEMINI_API_KEY) router.setDefaultProvider('openrouter');
         fallbackOrder.push('openrouter');
     }
+    if (process.env.GROQ_API_KEY) {
+        router.registerProvider('groq', new GroqProvider());
+        router.setDefaultProvider('groq');
+        fallbackOrder.unshift('groq');
+    } else if (process.env.GEMINI_API_KEY) {
+        router.setDefaultProvider('gemini-3.1-flash-lite');
+    }
     router.registerProvider('ollama', new OllamaProvider());
-    if (!process.env.GEMINI_API_KEY && !process.env.OPENROUTER_API_KEY) router.setDefaultProvider('ollama');
+    if (!process.env.GEMINI_API_KEY && !process.env.OPENROUTER_API_KEY && !process.env.GROQ_API_KEY) router.setDefaultProvider('ollama');
     fallbackOrder.push('ollama');
     router.setFallbackProviders(fallbackOrder);
-
+    
     // Fast router: lightweight model used exclusively for Planner JSON generation
     // and simple conversational fast-path routing. Much lower latency.
     let fastRouter: LLMRouter | undefined = new LLMRouter(eventBus);
+    const fastFallbackOrder: string[] = [];
+    
     if (process.env.GEMINI_API_KEY) {
         fastRouter.registerProvider('gemini-3.1-flash-lite', new GeminiProvider('gemini-3.1-flash-lite'));
-        fastRouter.setDefaultProvider('gemini-3.1-flash-lite');
-        fastRouter.setFallbackProviders(['gemini-3.1-flash-lite']);
-    } else {
-        fastRouter.registerProvider('ollama', new OllamaProvider());
-        fastRouter.setDefaultProvider('ollama');
-        fastRouter.setFallbackProviders(['ollama']);
+        fastFallbackOrder.push('gemini-3.1-flash-lite');
     }
+    
+    if (process.env.GROQ_API_KEY) {
+        fastRouter.registerProvider('groq', new GroqProvider('openai/gpt-oss-20b'));
+        fastRouter.setDefaultProvider('groq');
+        fastFallbackOrder.unshift('groq'); // Prioritize groq
+    } else if (process.env.GEMINI_API_KEY) {
+        fastRouter.setDefaultProvider('gemini-3.1-flash-lite');
+    }
+    
+    fastRouter.registerProvider('ollama', new OllamaProvider());
+    if (!process.env.GEMINI_API_KEY && !process.env.GROQ_API_KEY) {
+        fastRouter.setDefaultProvider('ollama');
+    }
+    fastFallbackOrder.push('ollama');
+    
+    fastRouter.setFallbackProviders(fastFallbackOrder);
 
     const toolRegistry = new ToolRegistry();
     toolRegistry.register(systemInfoTool);

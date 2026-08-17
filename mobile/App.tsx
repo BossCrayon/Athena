@@ -20,9 +20,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as Crypto from 'expo-crypto';
 import * as ImagePicker from 'expo-image-picker';
 
-const WS_URL_CHAT = 'wss://athena-brain.onrender.com/chat';
-const WS_URL_NODE = 'wss://athena-brain.onrender.com/nodes';
-
+const DEFAULT_WS_URL = 'wss://athena-brain.onrender.com';
 const NODE_CAPABILITIES = ['get_battery_level', 'vibrate_phone', 'get_location', 'capture_image'];
 
 interface Message {
@@ -38,6 +36,8 @@ export default function App() {
   const [tokenInput, setTokenInput] = useState('');
   const [hasToken, setHasToken] = useState(false);
   const [nodeId, setNodeId] = useState('');
+  const [serverUrl, setServerUrl] = useState(DEFAULT_WS_URL);
+  const [urlInput, setUrlInput] = useState('');
 
   useEffect(() => {
     async function loadIdentity() {
@@ -50,6 +50,14 @@ export default function App() {
 
       const storedToken = await SecureStore.getItemAsync('NODE_AUTH_TOKEN');
       setHasToken(!!storedToken);
+      
+      const storedUrl = await SecureStore.getItemAsync('ATHENA_SERVER_URL');
+      if (storedUrl) {
+          setServerUrl(storedUrl);
+          setUrlInput(storedUrl);
+      } else {
+          setUrlInput(DEFAULT_WS_URL);
+      }
     }
     loadIdentity();
   }, []);
@@ -67,12 +75,36 @@ export default function App() {
     setHasToken(false);
   };
 
+  const handleSaveUrl = async () => {
+    if (urlInput.trim()) {
+      await SecureStore.setItemAsync('ATHENA_SERVER_URL', urlInput.trim());
+      setServerUrl(urlInput.trim());
+      Alert.alert('Saved', 'Server URL updated successfully.');
+    }
+  };
+
   if (mode === 'selecting') {
     return (
       <View style={styles.startupContainer}>
         <StatusBar style="light" />
         <Text style={styles.startupTitle}>A T H E N A</Text>
         <Text style={styles.startupSubtitle}>Select Initialization Mode</Text>
+
+        <View style={{ width: '100%', marginBottom: 20, marginTop: 10 }}>
+          <Text style={{ color: '#8892b0', fontSize: 12, marginBottom: 5 }}>SERVER URL (For Local Testing):</Text>
+          <View style={{ flexDirection: 'row', width: '100%' }}>
+            <TextInput
+              style={[styles.textInput, { flex: 1, marginBottom: 0 }]}
+              value={urlInput}
+              onChangeText={setUrlInput}
+              autoCapitalize="none"
+              keyboardType="url"
+            />
+            <TouchableOpacity style={[styles.sendButton, { width: 80, marginLeft: 10, marginTop: 0 }]} onPress={handleSaveUrl}>
+              <Text style={styles.sendButtonText}>SAVE</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
 
         <TouchableOpacity style={styles.modeCard} onPress={() => setMode('ai')}>
           <Text style={styles.modeCardTitle}>Just AI (Standard)</Text>
@@ -123,10 +155,10 @@ export default function App() {
     );
   }
 
-  return <ChatScreen mode={mode} nodeId={nodeId} />;
+  return <ChatScreen mode={mode} nodeId={nodeId} serverUrl={serverUrl} />;
 }
 
-function ChatScreen({ mode, nodeId }: { mode: 'ai' | 'hardware', nodeId: string }) {
+function ChatScreen({ mode, nodeId, serverUrl }: { mode: 'ai' | 'hardware', nodeId: string, serverUrl: string }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isConnected, setIsConnected] = useState(false);
@@ -155,7 +187,7 @@ function ChatScreen({ mode, nodeId }: { mode: 'ai' | 'hardware', nodeId: string 
     await Location.requestForegroundPermissionsAsync();
     const token = await SecureStore.getItemAsync('NODE_AUTH_TOKEN');
 
-    const wsNode = new WebSocket(WS_URL_NODE);
+    const wsNode = new WebSocket(`${serverUrl}/nodes`);
     wsNode.onopen = () => {
       console.log('Mobile Node connected');
       nodeReconnectDelay = 1000;
@@ -228,12 +260,15 @@ function ChatScreen({ mode, nodeId }: { mode: 'ai' | 'hardware', nodeId: string 
       wsNodeRef.current = wsNode;
     };
 
+  let chatReconnectDelay = 1000;
   const connectChatWebSocket = () => {
-    const ws = new WebSocket(WS_URL_CHAT);
+    const wsChat = new WebSocket(`${serverUrl}/chat`);
+    wsChat.onopen = () => {
+      setIsConnected(true);
+      chatReconnectDelay = 1000;
+    };
 
-    ws.onopen = () => setIsConnected(true);
-
-    ws.onmessage = (event) => {
+    wsChat.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
         setIsWaiting(false);
@@ -277,13 +312,13 @@ function ChatScreen({ mode, nodeId }: { mode: 'ai' | 'hardware', nodeId: string 
       }
     };
 
-    ws.onclose = () => {
+    wsChat.onclose = () => {
       setIsConnected(false);
       setIsWaiting(false);
       setTimeout(connectChatWebSocket, 5000);
     };
 
-    wsChatRef.current = ws;
+    wsChatRef.current = wsChat;
   };
 
   const sendMessage = () => {

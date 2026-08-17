@@ -81,10 +81,12 @@ export class ToolExecutor {
 
                 if (laptopDeviceTools.includes(toolName)) {
                     const output = await this.nodeManager.executeToolOnNode(toolName, args, 'laptop', context.signal, correlationContext);
-                    return { success: true, output: String(output) };
+                    if (output && typeof output === 'object' && output.success === false) return output;
+                    return { success: true, output: typeof output === 'object' ? JSON.stringify(output) : String(output) };
                 } else if (mobileDeviceTools.includes(toolName)) {
                     const output = await this.nodeManager.executeToolOnNode(toolName, args, 'mobile', context.signal, correlationContext);
-                    return { success: true, output: String(output) };
+                    if (output && typeof output === 'object' && output.success === false) return output;
+                    return { success: true, output: typeof output === 'object' ? JSON.stringify(output) : String(output) };
                 }
             }
             
