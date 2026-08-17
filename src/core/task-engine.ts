@@ -1,4 +1,5 @@
 import { randomUUID, createHash } from 'crypto';
+import { SemanticRouter } from './semantic-router.js';
 import type { LLMRouter } from '../llm/router.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ToolOrchestrator } from '../tools/orchestrator.js';
@@ -59,39 +60,33 @@ export class TaskEngine {
         private readonly eventBus?: EventBus
     ) { }
 
-    /**
-     * Fast path: detect messages that don't need planning.
-     * Simple conversational messages, greetings, and very short requests
-     * skip the Planner and execute directly — saving one full LLM round-trip.
-     */
-    private isFastPath(input: string): boolean {
-        const trimmed = input.trim();
-        if (trimmed.length === 0) return false;
-        // Short messages are almost always conversational
-        if (trimmed.length < 80) return true;
-        // Longer messages may still be simple questions — check for planning keywords
-        const planningKeywords = [
-            'research', 'find all', 'compare', 'search for', 'fetch', 'download',
-            'create a file', 'write a file', 'run a command', 'execute', 'schedule',
-            'remind me', 'set a timer', 'autonomous', 'do this for me', 'background task',
-            'take a screenshot', 'capture', 'open', 'close', 'install', 'analyze',
-            'run ', 'start ', 'launch ', 'stop ', 'restart ', 'build ', 'deploy '
-        ];
-        const lower = trimmed.toLowerCase();
-        if (planningKeywords.some(kw => lower.includes(kw))) return false;
-        // Single-sentence questions are fast-path
-        const sentences = trimmed.split(/[.!?]+/).filter(s => s.trim().length > 0);
-        return sentences.length <= 2;
-    }
-
     async executeInteractive(
         userInput: string,
         history: Message[],
         onToken?: (text: string) => void,
         onToolCall?: (toolName: string) => void
     ): Promise<string> {
+        let isTask = true;
+        const trimmed = userInput.trim();
+        
+        // Tier 1: Regex / Heuristics (0ms)
+        if (trimmed.length < 10) {
+            isTask = false;
+        } else {
+            // Tier 2: Semantic Router (KNN Local Embedding, <20ms)
+            const router = SemanticRouter.getInstance();
+            const classification = await router.classifyIntent(userInput, 0.80);
+            
+            if (classification.confidence >= 0.80) {
+                isTask = classification.route === 'task';
+            } else {
+                // Tier 3: LLM Fallback (Ambiguous, assume task or route to fast path and let it escalate)
+                isTask = false; // We'll try fast path, and if it emits tools, it escalates automatically.
+            }
+        }
+
         // Fast path: skip planning for simple conversational messages
-        if (this.isFastPath(userInput)) {
+        if (!isTask) {
             const fastOptions: GenerationOptions = {
                 temperature: 0.7,
                 onToken,

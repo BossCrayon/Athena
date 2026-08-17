@@ -47,9 +47,15 @@ import { MemoryExtractor } from '../core/memory-extractor.js';
 import { TaskStore } from '../core/task-store.js';
 import { TelemetryTracker } from '../core/telemetry.js';
 import { DiagnosticHandler } from '../core/diagnostics.js';
+import { SemanticRouter } from '../core/semantic-router.js';
 
 // Initialize ATHENA backend
 async function setupAthena(nodeManager: NodeManager, eventBus: EventBus) {
+    // Eagerly initialize Semantic Router
+    SemanticRouter.getInstance().init().catch(err => {
+        console.error('[SemanticRouter] Failed to initialize:', err);
+    });
+
     const router = new LLMRouter(eventBus);
     const fallbackOrder: string[] = [];
 
