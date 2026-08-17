@@ -73,6 +73,16 @@ async function setupAthena(nodeManager: NodeManager, eventBus: EventBus) {
     fallbackOrder.push('ollama');
     router.setFallbackProviders(fallbackOrder);
 
+    // Fast router: lightweight model used exclusively for Planner JSON generation
+    // and simple conversational fast-path routing. Much lower latency.
+    let fastRouter: LLMRouter | undefined;
+    if (process.env.GEMINI_API_KEY) {
+        fastRouter = new LLMRouter(eventBus);
+        fastRouter.registerProvider('gemini-2.0-flash-lite', new GeminiProvider('gemini-2.0-flash-lite'));
+        fastRouter.setDefaultProvider('gemini-2.0-flash-lite');
+        fastRouter.setFallbackProviders(['gemini-2.0-flash-lite']);
+    }
+
     const toolRegistry = new ToolRegistry();
     toolRegistry.register(systemInfoTool);
     toolRegistry.register(currentTimeTool);
@@ -111,7 +121,8 @@ async function setupAthena(nodeManager: NodeManager, eventBus: EventBus) {
         memoryManager,
         contextBuilder,
         taskStore,
-        eventBus
+        eventBus,
+        fastRouter
     );
 
     await athena.initialize();
@@ -268,6 +279,25 @@ async function start() {
         const port = process.env.PORT ? parseInt(process.env.PORT) : 3000;
         await fastify.listen({ port, host: '0.0.0.0' });
         console.log(`ATHENA Server is running on port ${port}`);
+
+        // Render keep-alive: self-ping every 14 minutes to prevent cold starts.
+        // Render free tier spins down after 15 minutes of inactivity, adding 20-30s
+        // to the first response. This keeps the instance warm.
+        const selfPingUrl = process.env.RENDER_EXTERNAL_URL
+            ? `${process.env.RENDER_EXTERNAL_URL}/health`
+            : null;
+
+        if (selfPingUrl) {
+            setInterval(async () => {
+                try {
+                    await fetch(selfPingUrl);
+                    console.log('[KeepAlive] Self-ping sent to', selfPingUrl);
+                } catch (e) {
+                    // Non-fatal — don't crash the server if ping fails
+                }
+            }, 14 * 60 * 1000); // 14 minutes
+            console.log(`[KeepAlive] Render keep-alive active — pinging ${selfPingUrl} every 14 min`);
+        }
     } catch (err) {
         fastify.log.error(err);
         process.exit(1);

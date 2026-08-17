@@ -40,7 +40,8 @@ export class AthenaCore {
         memoryManager: CloudMemoryManager,
         contextBuilder: ContextBuilder,
         taskStore?: TaskStore,
-        eventBus?: EventBus
+        eventBus?: EventBus,
+        fastRouter?: LLMRouter
     ) {
         this.router = router;
         this.toolRegistry = toolRegistry;
@@ -50,7 +51,7 @@ export class AthenaCore {
         this.contextBuilder = contextBuilder;
         this.taskStore = taskStore;
         this.eventBus = eventBus;
-        const planner = new Planner(router, contextBuilder, taskStore);
+        const planner = new Planner(router, contextBuilder, taskStore, fastRouter);
         this.taskEngine = new TaskEngine(router, toolRegistry, toolOrchestrator, toolContext, planner, taskStore, eventBus);
 
         this.history = [];

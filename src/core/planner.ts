@@ -9,7 +9,8 @@ export class Planner {
     constructor(
         private readonly router: LLMRouter,
         private readonly contextBuilder: ContextBuilder,
-        private readonly taskStore?: TaskStore
+        private readonly taskStore?: TaskStore,
+        private readonly fastRouter?: LLMRouter // Optional lighter model for planning
     ) {}
 
     async createPlan(task: Task, contextString?: string): Promise<TaskPlan> {
@@ -100,7 +101,8 @@ Rules:
             { role: 'user', content: prompt }
         ];
 
-        const response = await this.router.generate(messages, {
+        const plannerRouter = this.fastRouter || this.router;
+        const response = await plannerRouter.generate(messages, {
             temperature: 0.1,
             routing: { intent: { reasoning: true } }
         });

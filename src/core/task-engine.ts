@@ -59,12 +59,55 @@ export class TaskEngine {
         private readonly eventBus?: EventBus
     ) {}
 
+    /**
+     * Fast path: detect messages that don't need planning.
+     * Simple conversational messages, greetings, and very short requests
+     * skip the Planner and execute directly — saving one full LLM round-trip.
+     */
+    private isFastPath(input: string): boolean {
+        const trimmed = input.trim();
+        if (trimmed.length === 0) return false;
+        // Short messages are almost always conversational
+        if (trimmed.length < 80) return true;
+        // Longer messages may still be simple questions — check for planning keywords
+        const planningKeywords = [
+            'research', 'find all', 'compare', 'search for', 'fetch', 'download',
+            'create a file', 'write a file', 'run a command', 'execute', 'schedule',
+            'remind me', 'set a timer', 'autonomous', 'do this for me', 'background task',
+            'take a screenshot', 'capture', 'open', 'close', 'install', 'analyze'
+        ];
+        const lower = trimmed.toLowerCase();
+        if (planningKeywords.some(kw => lower.includes(kw))) return false;
+        // Single-sentence questions are fast-path
+        const sentences = trimmed.split(/[.!?]+/).filter(s => s.trim().length > 0);
+        return sentences.length <= 2;
+    }
+
     async executeInteractive(
         userInput: string,
         history: Message[],
         onToken?: (text: string) => void,
         onToolCall?: (toolName: string) => void
     ): Promise<string> {
+        // Fast path: skip planning for simple conversational messages
+        if (this.isFastPath(userInput)) {
+            const fastOptions: GenerationOptions = {
+                temperature: 0.7,
+                onToken,
+                routing: { priority: 'latency', intent: { fastResponse: true } }
+            };
+            try {
+                const response = await this.router.generate(history, fastOptions, this.toolRegistry.getSchemas());
+                // If the model decided to call a tool anyway, fall through to full task execution
+                if (!response.toolCalls || response.toolCalls.length === 0) {
+                    return response.text || '';
+                }
+                // Has tool calls — escalate to full task execution below
+            } catch (e) {
+                // If fast path fails, fall through to full execution
+            }
+        }
+
         const task: Task = {
             id: randomUUID(),
             request: userInput,
