@@ -87,6 +87,7 @@ export class CloudMemoryManager {
                 query_embedding: embedding,
                 match_threshold: threshold,
                 match_count: limit * 3, // Fetch extra to allow for client-side filtering
+                p_session_id: this.sessionId,
             });
 
             if (error) throw error;
