@@ -78,9 +78,9 @@ async function setupAthena(nodeManager: NodeManager, eventBus: EventBus) {
     let fastRouter: LLMRouter | undefined;
     if (process.env.GEMINI_API_KEY) {
         fastRouter = new LLMRouter(eventBus);
-        fastRouter.registerProvider('gemini-2.0-flash-lite', new GeminiProvider('gemini-2.0-flash-lite'));
-        fastRouter.setDefaultProvider('gemini-2.0-flash-lite');
-        fastRouter.setFallbackProviders(['gemini-2.0-flash-lite']);
+        fastRouter.registerProvider('gemini-3.1-flash-lite', new GeminiProvider('gemini-3.1-flash-lite'));
+        fastRouter.setDefaultProvider('gemini-3.1-flash-lite');
+        fastRouter.setFallbackProviders(['gemini-3.1-flash-lite']);
     }
 
     const toolRegistry = new ToolRegistry();
