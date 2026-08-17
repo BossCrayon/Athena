@@ -16,13 +16,13 @@ export const systemControlTool: Tool = {
             parameters: [
                 {
                     name: 'action',
-                    description: 'The action to perform: "list_apps", "list_processes", "kill_process", "open_app", "system_info", "advanced_hardware_info", "network_status", "ip_lookup", "process_path", "deep_security_scan", "lock_system".',
+                    description: 'The action to perform: "list_apps", "list_processes", "kill_process", "open_app", "open_url", "system_info", "advanced_hardware_info", "network_status", "ip_lookup", "process_path", "deep_security_scan", "lock_system".',
                     type: 'string',
                     required: true,
                 },
                 {
                     name: 'target',
-                    description: 'The target process name, PID, app name, or IP address (e.g. "notepad.exe", "1234", "8.8.8.8").',
+                    description: 'The target process name, PID, app name, URL, or IP address. For open_app: use app names like "chrome", "notepad", "spotify" or full URLs like "https://google.com". For open_url: provide the full URL.',
                     type: 'string',
                     required: false,
                 }
@@ -82,12 +82,40 @@ export const systemControlTool: Tool = {
                 return { success: true, output: stdout };
             }
 
-            else if (action === 'open_app') {
-                if (!target) return { success: false, output: 'Must provide target app name.' };
-                // Start-Process starts it asynchronously so it doesn't block the server
-                const cmd = 'powershell -Command "Start-Process \'' + target + '\'"';
+            else if (action === 'open_app' || action === 'open_url') {
+                if (!target) return { success: false, output: 'Must provide a target app name or URL.' };
+                
+                let cmd: string;
+                const isUrl = target.startsWith('http://') || target.startsWith('https://') || target.startsWith('www.');
+                const normalizedTarget = target.startsWith('www.') ? 'https://' + target : target;
+
+                if (isUrl) {
+                    // Open URL in the default browser — most reliable on Windows
+                    cmd = `powershell -Command "Start-Process '${normalizedTarget}'"` ;
+                } else {
+                    // Map common friendly names to real executables
+                    const appMap: Record<string, string> = {
+                        'google': 'https://www.google.com',
+                        'youtube': 'https://www.youtube.com',
+                        'chrome': 'chrome',
+                        'edge': 'msedge',
+                        'firefox': 'firefox',
+                        'notepad': 'notepad',
+                        'explorer': 'explorer',
+                        'calculator': 'calc',
+                        'spotify': 'spotify',
+                        'discord': 'discord',
+                    };
+                    const resolved = appMap[target.toLowerCase()] || target;
+                    const resolvedIsUrl = resolved.startsWith('http');
+                    cmd = `powershell -Command "Start-Process '${resolved}'"` ;
+                    if (resolvedIsUrl) {
+                        cmd = `powershell -Command "Start-Process '${resolved}'"` ;
+                    }
+                }
+
                 await execAsync(cmd);
-                return { success: true, output: 'Successfully sent command to open: ' + target };
+                return { success: true, output: `Successfully opened: ${target}` };
             }
 
             else if (action === 'lock_system') {
