@@ -86,6 +86,7 @@ Athena/
 │   │   ├── telemetry.ts           # K4 structured telemetry
 │   │   ├── diagnostics.ts         # Local diagnostic commands
 │   │   ├── safety.ts              # Safety constraints
+│   │   ├── semantic-router.ts     # SemanticRouter — local intent routing
 │   │   ├── embeddings.ts          # Embedding utilities
 │   │   ├── voice.ts               # Voice support
 │   │   └── task-queue.ts          # Task queue management
@@ -125,6 +126,9 @@ Athena/
 │   ├── personality/
 │   │   └── athena.ts              # ATHENA_SYSTEM_PROMPT (identity & rules)
 │   │
+│   ├── scripts/
+│   │   └── invite.ts              # Generate auth_invites for mobile/nodes
+│   │
 │   ├── server/
 │   │   └── index.ts               # Fastify server — /chat WS, /health, /ready
 │   │
@@ -161,6 +165,9 @@ Athena/
 Multi-provider routing with intent-aware fallback.
 - **Main Router**: Handles complex tool orchestration and task verification. Prioritizes ultra-fast open-source models on Groq (e.g., `gpt-oss-20b`) for millisecond latency, seamlessly falling back to Google Gemini (`flash-lite`) if strict Token-Per-Minute (TPM) limits are exceeded.
 - **Fast Router**: A dedicated lightweight router used exclusively for structured Planner JSON generation and simple conversational routing to minimize Time-To-First-Token (TTFT).
+
+### Semantic Router
+A local embedding-based router (`Xenova/all-MiniLM-L6-v2`) used to rapidly classify user intent before hitting external LLMs. It determines if a request requires full planning, memory access, or if it can be fast-tracked to simple tool execution.
 
 ### Planner (K5)
 LLM-driven structured planner that converts a user goal into a `TaskPlan` — a JSON DAG of `TaskSubgoal` objects with dependencies, requirements, and verification strategies. The planner natively ingests the active conversation history to resolve contextual/anaphoric references before DAG generation. Replanning is supported when a subgoal fails.
@@ -245,6 +252,9 @@ npm run server
 
 # Or start the CLI client (connects to the deployed brain)
 npm run chat
+
+# Generate a device registration invite
+npm run invite
 ```
 
 ### Desktop Node
