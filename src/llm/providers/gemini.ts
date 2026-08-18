@@ -115,15 +115,18 @@ export class GeminiProvider implements LLMProvider {
                     }
                 }
 
+                const hasParams = tool.parameters && tool.parameters.length > 0;
                 return {
                     type: 'function' as const,
                     name: tool.name,
                     description: tool.description,
-                    parameters: {
-                        type: 'object' as const,
-                        properties,
-                        ...(required.length > 0 ? { required } : {}),
-                    },
+                    ...(hasParams ? {
+                        parameters: {
+                            type: 'object' as const,
+                            properties,
+                            ...(required.length > 0 ? { required } : {}),
+                        },
+                    } : {}),
                 };
             });
 
@@ -220,15 +223,18 @@ export class GeminiProvider implements LLMProvider {
                 }
             }
 
+            const hasParams = tool.parameters && tool.parameters.length > 0;
             return {
                 type: 'function' as const,
                 name: tool.name,
                 description: tool.description,
-                parameters: {
-                    type: 'object' as const,
-                    properties,
-                    ...(required.length > 0 ? { required } : {}),
-                },
+                ...(hasParams ? {
+                    parameters: {
+                        type: 'object' as const,
+                        properties,
+                        ...(required.length > 0 ? { required } : {}),
+                    },
+                } : {}),
             };
         });
 

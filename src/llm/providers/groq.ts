@@ -62,17 +62,20 @@ export class GroqProvider implements LLMProvider {
                 }
             }
 
+            const hasParams = tool.parameters && tool.parameters.length > 0;
             return {
                 type: 'function',
                 function: {
                     name: tool.name,
                     description: tool.description,
-                    parameters: {
-                        type: 'object',
-                        properties,
-                        required,
-                        additionalProperties: false,
-                    },
+                    ...(hasParams ? {
+                        parameters: {
+                            type: 'object',
+                            properties,
+                            required,
+                            additionalProperties: false,
+                        },
+                    } : {}),
                 },
             };
         });

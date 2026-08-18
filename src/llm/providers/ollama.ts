@@ -71,16 +71,20 @@ export class OllamaProvider implements LLMProvider {
                 }
             }
 
+            const hasParams = t.parameters && t.parameters.length > 0;
             return {
                 type: 'function',
                 function: {
                     name: t.name,
                     description: t.description,
-                    parameters: {
-                        type: 'object',
-                        properties,
-                        required
-                    }
+                    ...(hasParams ? {
+                        parameters: {
+                            type: 'object',
+                            properties,
+                            required,
+                            additionalProperties: false,
+                        },
+                    } : {}),
                 }
             };
         });
