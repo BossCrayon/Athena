@@ -482,8 +482,9 @@ export class TaskEngine {
         onToolCall?: (toolName: string) => void,
         toolSchemas?: ToolSchema[]
     ): Promise<{ success: boolean, errorObservation?: string }> {
-        const schemas = toolSchemas ?? this.toolRegistry.getSchemas();
-        let iterations = 0;
+        try {
+            const schemas = toolSchemas ?? this.toolRegistry.getSchemas();
+            let iterations = 0;
 
         const intent = { ...(baseOptions.routing?.intent || {}), ...(subgoal.requirements || {}) };
         const routingOptions: GenerationOptions = {
@@ -731,5 +732,8 @@ DO NOT use any tools. DO NOT output any XML or JSON. Just reply with the exact w
         }
 
         return { success: true };
+        } catch (error: any) {
+            return { success: false, errorObservation: `Subgoal Execution Error: ${error?.message || error}` };
+        }
     }
 }

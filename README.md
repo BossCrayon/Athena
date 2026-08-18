@@ -322,6 +322,7 @@ Managed in Supabase (PostgreSQL). Key tables:
 | K6 | Multimodal perception (images, screenshots) | ✅ Complete |
 | v0.4.0 | Secure web & external capabilities | ✅ Complete |
 | v0.5.0 | Latency, Fast/Dual Routers, Context-Aware Planning | ✅ Complete |
+| v0.5.1 | Task Engine Reliability, Graceful Rejection, Schema Fixes | ✅ Complete |
 | v0.6.0 | TBD | 🔜 Pending |
 
 ---
