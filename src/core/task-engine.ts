@@ -274,7 +274,23 @@ export class TaskEngine {
         // K5: Explicit Planning Phase
         if (!task.plan || task.status === 'planning') {
             const planStart = Date.now();
-            task.plan = await this.planner.createPlan(task, history);
+            try {
+                task.plan = await this.planner.createPlan(task, history);
+            } catch (err: any) {
+                task.status = 'failed';
+                if (this.taskStore) await this.taskStore.update(task);
+                if (this.eventBus) {
+                    this.eventBus.emit('telemetry', {
+                        eventType: 'task_failed',
+                        timestamp: new Date().toISOString(),
+                        taskId: task.id,
+                        errorCategory: 'planning_failed'
+                    });
+                }
+                const output = `I apologize, I am currently unable to connect to my brain. ${err?.message || 'Unknown network error'}`;
+                if (routingOptions.onToken) routingOptions.onToken(output);
+                return output;
+            }
             task.telemetry.llmGenerationMs! += (Date.now() - planStart);
             task.status = 'executing';
 
@@ -359,7 +375,23 @@ export class TaskEngine {
                 }
 
                 const replanStart = Date.now();
-                task.plan = await this.planner.replan(task, failedSg, (failedSg as any)._lastError || 'Unknown failure');
+                try {
+                    task.plan = await this.planner.replan(task, failedSg, (failedSg as any)._lastError || 'Unknown failure');
+                } catch (err: any) {
+                    task.status = 'failed';
+                    if (this.taskStore) await this.taskStore.update(task);
+                    if (this.eventBus) {
+                        this.eventBus.emit('telemetry', {
+                            eventType: 'task_failed',
+                            timestamp: new Date().toISOString(),
+                            taskId: task.id,
+                            errorCategory: 'replan_failed'
+                        });
+                    }
+                    const text = `I apologize, I encountered a critical network error while trying to proceed. ${err?.message || 'Unknown error'}`;
+                    if (routingOptions.onToken) routingOptions.onToken(text);
+                    return text;
+                }
                 task.telemetry.llmGenerationMs! += (Date.now() - replanStart);
 
                 this.validatePlan(task.plan!);
