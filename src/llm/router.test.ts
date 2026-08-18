@@ -85,12 +85,12 @@ async function runTests() {
         assert.ok(primaryHealth.cooldownUntil && primaryHealth.cooldownUntil > Date.now(), 'Cooldown not set');
     }
 
-    // Test 4: Retry delay extraction
+    // Test 4: Retry delay extraction (regex)
     {
         const router = new LLMRouter();
         router.registerProvider('primary', new MockProvider(
             { name: 'primary', capabilities: { tools: true, vision: false, streaming: false }, cost: 'low', latency: 'low' },
-            async () => { throw new Error('Quota exceeded. Please retry in 48.147s'); }
+            async () => { throw new Error('Quota exceeded. Please try again in 9.225s'); }
         ));
         router.registerProvider('secondary', new MockProvider(
             { name: 'secondary', capabilities: { tools: true, vision: false, streaming: false }, cost: 'low', latency: 'low' },
@@ -102,9 +102,34 @@ async function runTests() {
         const primaryHealth = router.getProviderHealth('primary');
         
         assert.strictEqual(primaryHealth?.status, 'rate-limited');
-        // Delay should be ceil(48.147) = 49 seconds
-        const expectedCooldown = Date.now() + 49 * 1000;
-        assert.ok(primaryHealth!.cooldownUntil! <= expectedCooldown + 1000 && primaryHealth!.cooldownUntil! >= expectedCooldown - 1000, 'Retry extraction failed');
+        // Delay should be ceil(9.225) = 10 seconds
+        const expectedCooldown = Date.now() + 10 * 1000;
+        assert.ok(primaryHealth!.cooldownUntil! <= expectedCooldown + 1000 && primaryHealth!.cooldownUntil! >= expectedCooldown - 1000, 'Retry extraction failed for "try again in"');
+    }
+
+    // Test 4b: Retry delay extraction (Retry-After header)
+    {
+        const router = new LLMRouter();
+        router.registerProvider('primary', new MockProvider(
+            { name: 'primary', capabilities: { tools: true, vision: false, streaming: false }, cost: 'low', latency: 'low' },
+            async () => { 
+                const err: any = new Error('429 Rate Limit');
+                err.headers = { 'retry-after': '12' };
+                throw err;
+            }
+        ));
+        router.registerProvider('secondary', new MockProvider(
+            { name: 'secondary', capabilities: { tools: true, vision: false, streaming: false }, cost: 'low', latency: 'low' },
+            async () => ({ text: 'secondary success' })
+        ));
+        router.setFallbackProviders(['primary', 'secondary']);
+
+        await router.generate([]);
+        const primaryHealth = router.getProviderHealth('primary');
+        
+        assert.strictEqual(primaryHealth?.status, 'rate-limited');
+        const expectedCooldown = Date.now() + 12 * 1000;
+        assert.ok(primaryHealth!.cooldownUntil! <= expectedCooldown + 1000 && primaryHealth!.cooldownUntil! >= expectedCooldown - 1000, 'Retry-After header extraction failed');
     }
 
     // Test 5: All providers unavailable
@@ -214,6 +239,55 @@ async function runTests() {
         // fastResponse intent should prioritize latency (base is lowest)
         const res4 = await router.generate([], { routing: { intent: { fastResponse: true } } });
         assert.strictEqual(res4.text, 'base text');
+    }
+
+    // Test 9: Empty response detection
+    {
+        const router = new LLMRouter();
+        
+        router.registerProvider('empty-provider', new MockProvider(
+            { name: 'empty-provider', capabilities: { tools: true, vision: false, streaming: false }, cost: 'low', latency: 'low' },
+            async () => ({ text: '' }),
+            async () => ({ text: '   \n  ' }) // continuation empty
+        ));
+        router.registerProvider('fallback-provider', new MockProvider(
+            { name: 'fallback-provider', capabilities: { tools: true, vision: false, streaming: false }, cost: 'low', latency: 'low' },
+            async () => ({ text: 'fallback success' }),
+            async () => ({ text: 'continuation success' })
+        ));
+        
+        router.setFallbackProviders(['empty-provider', 'fallback-provider']);
+
+        // Test 9a: Empty generate
+        router.setDefaultProvider('empty-provider');
+        const resGenerate = await router.generate([]);
+        assert.strictEqual(resGenerate.text, 'fallback success', 'Did not fallback from empty response');
+        
+        const emptyHealth = router.getProviderHealth('empty-provider');
+        assert.strictEqual(emptyHealth?.status, 'error', 'Empty response provider should be marked as error');
+        
+        // Restore empty-provider health for next test
+        emptyHealth.status = 'healthy';
+        emptyHealth.failures = 0;
+        emptyHealth.cooldownUntil = undefined;
+
+        // Test 9b: Empty continuation
+        // First request is to primary which owns the continuation ID
+        // The router will try to continue on 'empty-provider' which returns empty, should fallback
+        const resContinue = await router.continueWithToolResults('123', [], []);
+        assert.strictEqual(resContinue.text, 'fallback success', 'Did not fallback from empty continuation');
+        assert.strictEqual(router.getProviderHealth('empty-provider')?.status, 'error', 'Empty continuation should be marked as error');
+
+        // Test 9c: Tool call is NOT empty
+        const router2 = new LLMRouter();
+        router2.registerProvider('tool', new MockProvider(
+            { name: 'tool', capabilities: { tools: true, vision: false, streaming: false }, cost: 'low', latency: 'low' },
+            async () => ({ text: '', toolCalls: [{ id: '1', name: 'myTool', arguments: {} }] })
+        ));
+        router2.setDefaultProvider('tool');
+        const resTool = await router2.generate([]);
+        assert.strictEqual(resTool.toolCalls?.length, 1, 'Tool calls should not be treated as empty');
+        assert.strictEqual(router2.getProviderHealth('tool')?.status, 'healthy', 'Tool call provider should remain healthy');
     }
 
     console.log('All tests passed!');

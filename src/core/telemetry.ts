@@ -98,6 +98,7 @@ export function classifyError(error: any): string {
     if (errStr.includes('permission denied')) return 'permission_denied';
     if (errStr.includes('memory')) return 'memory_failure';
     if (errStr.includes('supabase') || errStr.includes('postgres')) return 'persistence_failure';
+    if (errStr.includes('provider returned an empty response')) return 'provider_empty_response';
     
     return 'unknown_error';
 }

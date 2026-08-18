@@ -62,21 +62,30 @@ export class LLMRouter {
         const status = error?.status || error?.statusCode;
 
         // Detect rate limit
-        const isRateLimit = status === 429 || errStr.includes('429') || errStr.includes('quota') || errStr.includes('rate limit') || errStr.includes('retry in');
+        const isRateLimit = status === 429 || errStr.includes('429') || errStr.includes('quota') || errStr.includes('rate limit') || /(?:retry|try again) in/i.test(errStr);
 
         if (isRateLimit) {
             state.status = 'rate-limited';
             
-            // Try to extract Retry-After or specific text "Please retry in X.Xs"
             let cooldownSeconds = 60; // Default 60s
             
-            const retryMatch = errStr.match(/retry in ([\d\.]+)s/);
-            if (retryMatch && retryMatch[1]) {
-                cooldownSeconds = Math.ceil(parseFloat(retryMatch[1]));
-            } else if (error?.headers?.['retry-after']) {
+            if (error?.headers?.['retry-after']) {
                 const retryAfter = parseInt(error.headers['retry-after'], 10);
-                if (!isNaN(retryAfter)) {
+                if (!isNaN(retryAfter) && retryAfter > 0) {
                     cooldownSeconds = retryAfter;
+                }
+            } else if (error?.retryAfter) {
+                const retryAfter = parseFloat(error.retryAfter);
+                if (!isNaN(retryAfter) && retryAfter > 0) {
+                    cooldownSeconds = Math.ceil(retryAfter);
+                }
+            } else {
+                const retryMatch = errStr.match(/(?:retry|try again) in ([\d\.]+)s/i);
+                if (retryMatch && retryMatch[1]) {
+                    const parsed = parseFloat(retryMatch[1]);
+                    if (!isNaN(parsed) && parsed > 0) {
+                        cooldownSeconds = Math.ceil(parsed);
+                    }
                 }
             }
             
@@ -94,16 +103,22 @@ export class LLMRouter {
             }
         } else {
             // Standard error
-            if (state.failures >= 3) {
+            const errCategory = classifyError(error);
+            const isEmptyResponse = errCategory === 'provider_empty_response';
+            
+            if (isEmptyResponse) {
+                state.status = 'error';
+                state.cooldownUntil = Date.now() + 60 * 1000;
+            } else if (state.failures >= 3) {
                 state.status = 'error';
                 state.cooldownUntil = Date.now() + 30 * 1000; // 30s cooldown for general repeated errors
             }
             if (this.eventBus) {
                 this.eventBus.emit('telemetry', {
-                    eventType: 'provider_failed',
+                    eventType: isEmptyResponse ? 'provider_empty_response' : 'provider_failed',
                     timestamp: new Date().toISOString(),
                     provider: providerName,
-                    errorCategory: classifyError(error)
+                    errorCategory: errCategory
                 });
             }
         }
@@ -272,6 +287,10 @@ export class LLMRouter {
                     result = await generatePromise;
                 }
                 
+                if (!result.text?.trim() && !result.toolCalls?.length) {
+                    throw new Error('Provider returned an empty response.');
+                }
+                
                 this.handleProviderSuccess(providerName);
                 if (this.eventBus) {
                     this.eventBus.emit('telemetry', {
@@ -345,6 +364,10 @@ export class LLMRouter {
                         ]);
                     } else {
                         result = await continuePromise;
+                    }
+                    
+                    if (!result.text?.trim() && !result.toolCalls?.length) {
+                        throw new Error('Provider returned an empty response.');
                     }
                     
                     if (this.eventBus) {
@@ -429,6 +452,10 @@ export class LLMRouter {
                     ]);
                 } else {
                     result = await generatePromise;
+                }
+
+                if (!result.text?.trim() && !result.toolCalls?.length) {
+                    throw new Error('Provider returned an empty response.');
                 }
 
                 this.handleProviderSuccess(providerName);
