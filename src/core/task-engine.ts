@@ -77,37 +77,30 @@ export class TaskEngine {
         ]);
 
         // If user role, inject a restriction into history context
-        const effectiveHistory = role === 'user'
-            ? [
-                ...history,
-            ]
-            : history;
-        let isTask = true;
-        const trimmed = userInput.trim();
-        
-        // Tier 1: Regex / Heuristics (0ms)
-        if (trimmed.length < 10) {
-            isTask = false;
-        } else {
-            // Tier 2: Semantic Router (KNN Local Embedding, <20ms)
-            const router = SemanticRouter.getInstance();
-            const classification = await router.classifyIntent(userInput, 0.55);
-            
-            if (classification.confidence >= 0.55) {
-                isTask = classification.route === 'task';
-            } else {
-                // Tier 3: LLM Fallback (Ambiguous, assume task or route to fast path and let it escalate)
-                isTask = false; // We'll try fast path, and if it emits tools, it escalates automatically.
-            }
-        }
+        const effectiveHistory = role === 'user' ? [...history] : history;
 
-        // Fast path: skip planning for simple conversational messages
-        // Filter schemas based on role - users cannot see admin-only tool definitions
+        const toolContext = role === 'user'
+            ? {
+                ...this.defaultToolContext,
+                signal,
+                askPermission: async (toolName: string, args: Record<string, unknown>) => {
+                    if (ADMIN_ONLY_TOOLS.has(toolName)) {
+                        return false; // Silently deny
+                    }
+                    return this.defaultToolContext.askPermission?.(toolName, args) ?? true;
+                }
+            }
+            : { ...this.defaultToolContext, signal };
+
         const allowedSchemas = role === 'user'
             ? this.toolRegistry.getSchemas().filter(s => !ADMIN_ONLY_TOOLS.has(s.name))
             : this.toolRegistry.getSchemas();
 
-        if (!isTask) {
+        const trimmed = userInput.trim();
+        // Force heavy planner only for massive prompts, slash commands, or if fast-track fails
+        const isExplicitTask = trimmed.startsWith('/') || trimmed.length > 300; 
+
+        if (!isExplicitTask) {
             const fastOptions: GenerationOptions = {
                 temperature: 0.7,
                 onToken,
@@ -116,11 +109,43 @@ export class TaskEngine {
             };
             try {
                 const response = await this.router.generate(effectiveHistory, fastOptions, allowedSchemas);
-                // If the model decided to call a tool anyway, fall through to full task execution
+                
                 if (!response.toolCalls || response.toolCalls.length === 0) {
                     return response.text || '';
                 }
-                // Has tool calls — escalate to full task execution below
+                
+                // FAST TRACK: If it generated a single tool call, execute it directly without the Planner!
+                if (response.toolCalls.length === 1) {
+                    const call = response.toolCalls[0];
+                    if (onToolCall) onToolCall(call.name);
+                    
+                    let resultOutput: string;
+                    try {
+                        const raw = await this.toolOrchestrator.executeTool(call.name, call.arguments, toolContext);
+                        resultOutput = typeof raw === 'string' ? raw : JSON.stringify(raw);
+                    } catch (e: any) {
+                        resultOutput = `Error executing tool: ${e.message}`;
+                    }
+                    
+                    const toolResult: ToolResult = {
+                        toolCallId: call.id,
+                        toolName: call.name,
+                        success: !resultOutput.startsWith('Error executing tool'),
+                        output: resultOutput
+                    };
+
+                    const finalResponse = await this.router.continueWithToolResults(
+                        response.continuationId!, 
+                        [toolResult], 
+                        effectiveHistory, 
+                        fastOptions, 
+                        allowedSchemas
+                    );
+                    
+                    return finalResponse.text || '';
+                }
+                
+                // If it generated multiple tool calls, fall through to the full autonomous task engine below
             } catch (e) {
                 // If fast path fails, fall through to full execution
             }
@@ -148,19 +173,6 @@ export class TaskEngine {
             routing: { priority: 'latency', requireTools: true },
             signal
         };
-
-        const toolContext = role === 'user'
-            ? {
-                ...this.defaultToolContext,
-                signal,
-                askPermission: async (toolName: string, args: Record<string, unknown>) => {
-                    if (ADMIN_ONLY_TOOLS.has(toolName)) {
-                        return false; // Silently deny
-                    }
-                    return this.defaultToolContext.askPermission?.(toolName, args) ?? true;
-                }
-            }
-            : { ...this.defaultToolContext, signal };
 
         return await this.executeInternal(task, effectiveHistory, toolContext, routingOptions, onToolCall, allowedSchemas, signal);
     }
