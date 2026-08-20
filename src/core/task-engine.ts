@@ -114,11 +114,11 @@ export class TaskEngine {
                     return response.text || '';
                 }
                 
-                // FAST TRACK: Execute tools immediately in a quick ReAct loop (up to 3 turns)
+                // FAST TRACK: Execute tools immediately in a quick ReAct loop (up to 5 turns)
                 let currentResponse = response;
                 let iteration = 0;
                 
-                while (currentResponse.toolCalls && currentResponse.toolCalls.length > 0 && iteration < 3) {
+                while (currentResponse.toolCalls && currentResponse.toolCalls.length > 0 && iteration < 5) {
                     iteration++;
                     const results: ToolResult[] = [];
                     
