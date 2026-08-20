@@ -114,38 +114,52 @@ export class TaskEngine {
                     return response.text || '';
                 }
                 
-                // FAST TRACK: If it generated a single tool call, execute it directly without the Planner!
-                if (response.toolCalls.length === 1) {
-                    const call = response.toolCalls[0];
-                    if (onToolCall) onToolCall(call.name);
+                // FAST TRACK: Execute tools immediately in a quick ReAct loop (up to 3 turns)
+                let currentResponse = response;
+                let iteration = 0;
+                
+                while (currentResponse.toolCalls && currentResponse.toolCalls.length > 0 && iteration < 3) {
+                    iteration++;
+                    const results: ToolResult[] = [];
                     
-                    let resultOutput: string;
-                    try {
-                        const raw = await this.toolOrchestrator.executeTool(call.name, call.arguments, toolContext);
-                        resultOutput = typeof raw === 'string' ? raw : JSON.stringify(raw);
-                    } catch (e: any) {
-                        resultOutput = `Error executing tool: ${e.message}`;
+                    for (const call of currentResponse.toolCalls) {
+                        if (onToolCall) onToolCall(call.name);
+                        
+                        let resultOutput: string;
+                        let isSuccess = false;
+                        try {
+                            const raw = await this.toolOrchestrator.handle({ toolName: call.name, arguments: call.arguments }, toolContext);
+                            isSuccess = raw.success;
+                            resultOutput = raw.success 
+                                ? (typeof raw.output === 'string' ? raw.output : JSON.stringify(raw.output)) 
+                                : (raw.error || 'Unknown tool error');
+                        } catch (e: any) {
+                            resultOutput = `Error executing tool: ${e.message}`;
+                        }
+                        
+                        results.push({
+                            toolCallId: call.id,
+                            toolName: call.name,
+                            success: isSuccess,
+                            output: resultOutput
+                        });
                     }
-                    
-                    const toolResult: ToolResult = {
-                        toolCallId: call.id,
-                        toolName: call.name,
-                        success: !resultOutput.startsWith('Error executing tool'),
-                        output: resultOutput
-                    };
 
-                    const finalResponse = await this.router.continueWithToolResults(
-                        response.continuationId!, 
-                        [toolResult], 
+                    currentResponse = await this.router.continueWithToolResults(
+                        currentResponse.continuationId!, 
+                        results, 
                         effectiveHistory, 
                         fastOptions, 
                         allowedSchemas
                     );
-                    
-                    return finalResponse.text || '';
                 }
                 
-                // If it generated multiple tool calls, fall through to the full autonomous task engine below
+                if (currentResponse.toolCalls && currentResponse.toolCalls.length > 0) {
+                    return (currentResponse.text || '') + '\n\n*(Note: This request requires deeper analysis. For complex autonomous tasks, prefix your prompt with /goal)*';
+                }
+                
+                return currentResponse.text || '';
+                
             } catch (e) {
                 // If fast path fails, fall through to full execution
             }
