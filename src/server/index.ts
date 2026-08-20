@@ -74,16 +74,22 @@ async function setupAthena(nodeManager: NodeManager, eventBus: EventBus) {
     }
     if (process.env.OPENROUTER_API_KEY) {
         router.registerProvider('openrouter', new OpenRouterProvider());
-        if (!process.env.GEMINI_API_KEY) router.setDefaultProvider('openrouter');
         fallbackOrder.push('openrouter');
     }
     if (process.env.GROQ_API_KEY) {
         router.registerProvider('groq', new GroqProvider());
-        router.setDefaultProvider('groq');
-        fallbackOrder.unshift('groq');
-    } else if (process.env.GEMINI_API_KEY) {
-        router.setDefaultProvider('gemini-3.1-flash-lite');
+        fallbackOrder.push('groq'); // Groq is now just a fallback
     }
+    
+    // Set default provider (Prioritize Gemini!)
+    if (process.env.GEMINI_API_KEY) {
+        router.setDefaultProvider('gemini-3.5-flash-lite');
+    } else if (process.env.OPENROUTER_API_KEY) {
+        router.setDefaultProvider('openrouter');
+    } else if (process.env.GROQ_API_KEY) {
+        router.setDefaultProvider('groq');
+    }
+    
     router.registerProvider('ollama', new OllamaProvider());
     if (!process.env.GEMINI_API_KEY && !process.env.OPENROUTER_API_KEY && !process.env.GROQ_API_KEY) router.setDefaultProvider('ollama');
     fallbackOrder.push('ollama');
@@ -101,10 +107,13 @@ async function setupAthena(nodeManager: NodeManager, eventBus: EventBus) {
     
     if (process.env.GROQ_API_KEY) {
         fastRouter.registerProvider('groq', new GroqProvider('openai/gpt-oss-20b'));
-        fastRouter.setDefaultProvider('groq');
-        fastFallbackOrder.unshift('groq'); // Prioritize groq
-    } else if (process.env.GEMINI_API_KEY) {
+        fastFallbackOrder.push('groq');
+    }
+    
+    if (process.env.GEMINI_API_KEY) {
         fastRouter.setDefaultProvider('gemini-3.1-flash-lite');
+    } else if (process.env.GROQ_API_KEY) {
+        fastRouter.setDefaultProvider('groq');
     }
     
     fastRouter.registerProvider('ollama', new OllamaProvider());

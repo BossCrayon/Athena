@@ -26,6 +26,14 @@ ${task.steps.map(s => `- Tool: ${s.toolName}\n  Args: ${JSON.stringify(s.argumen
 Evaluate the completed task and determine if there is any long-term semantic, episodic, preference, fact, decision, or project memory that should be saved.
 Do not extract trivial temporary task states. Only extract facts, user preferences, or major episodic events that would be useful later.
 
+CRITICAL DIRECTIVE: DO NOT extract ephemeral or real-time state data as facts. 
+Examples of things you MUST NOT extract:
+- Current weather (e.g. "The weather in Bacolod is 32C")
+- Current time or dates
+- Current system status (battery levels, active processes, RAM usage)
+- Stock prices or news headlines
+These are temporary states, not long-term memories.
+
 Respond ONLY with a valid JSON object matching this schema:
 {
   "memories": [
