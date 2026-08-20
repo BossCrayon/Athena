@@ -435,6 +435,12 @@ function ChatScreen({
     setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
   };
 
+  const handleStop = () => {
+    setIsWaiting(false);
+    wsChatRef.current?.send(JSON.stringify({ type: 'stop' }));
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+  };
+
   const handlePickImage = async () => {
     let result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -618,13 +624,22 @@ function ChatScreen({
               multiline
               maxLength={1000}
             />
-            <TouchableOpacity
-              style={[styles.sendBtn, (!inputText.trim() && !selectedImage) && styles.sendBtnDisabled]}
-              onPress={sendMessage}
-              disabled={!inputText.trim() && !selectedImage}
-            >
-              <Text style={styles.sendBtnIcon}>↑</Text>
-            </TouchableOpacity>
+            {isWaiting ? (
+              <TouchableOpacity
+                style={[styles.sendBtn, { backgroundColor: '#ff3366' }]}
+                onPress={handleStop}
+              >
+                <Text style={styles.sendBtnIcon}>×</Text>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity
+                style={[styles.sendBtn, (!inputText.trim() && !selectedImage) && styles.sendBtnDisabled]}
+                onPress={sendMessage}
+                disabled={!inputText.trim() && !selectedImage}
+              >
+                <Text style={styles.sendBtnIcon}>↑</Text>
+              </TouchableOpacity>
+            )}
           </View>
           <TouchableOpacity onPress={() => setMessages([])} style={styles.clearBtn}>
             <Text style={styles.clearBtnText}>Clear chat</Text>

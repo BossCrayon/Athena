@@ -1,4 +1,9 @@
 node_modules/
 .env
 dist/
+dist-electron/
+release/
+*.log
 *.logscratch/
+OllamaSetup.exe
+test_*.js

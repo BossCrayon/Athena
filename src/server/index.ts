@@ -342,6 +342,11 @@ fastify.register(async function (app) {
         connection.on('message', async (message: string) => {
             try {
                 const data = JSON.parse(message);
+                if (data.type === 'stop') {
+                    athena.stop();
+                    return;
+                }
+
                 if (data.type === 'text') {
                     const diagResult = diagnostics.handleCommand(data.text);
                     if (diagResult !== null) {

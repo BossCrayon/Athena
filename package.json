@@ -2,11 +2,14 @@
   "name": "athena",
   "version": "0.1.0",
   "type": "module",
+  "main": "dist-electron/main.js",
   "scripts": {
     "chat": "tsx src/cli/index.ts",
     "invite": "tsx src/scripts/invite.ts",
     "server": "tsx src/server/index.ts",
-    "node": "tsx src/node/index.ts"
+    "node": "tsx src/node/cli.ts",
+    "dev:desktop": "vite",
+    "build:desktop": "vite build && electron-builder --dir"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.0",
@@ -21,15 +24,44 @@
     "fastify": "^5.12.0",
     "googlethis": "^1.8.0",
     "ipaddr.js": "^2.5.0",
+    "lucide-react": "^1.31.0",
     "openai": "^7.4.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
     "turndown": "^7.2.4",
     "ws": "^8.21.3"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
     "@types/turndown": "^5.0.6",
     "@types/ws": "^8.18.1",
+    "@vitejs/plugin-react": "^6.0.5",
+    "electron": "^43.4.0",
+    "electron-builder": "^26.15.3",
     "tsx": "^4.23.12",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vite-plugin-electron": "^1.1.1"
+  },
+  "build": {
+    "appId": "com.athena.desktop",
+    "productName": "ATHENA",
+    "npmRebuild": false,
+    "asar": false,
+    "directories": {
+      "output": "release"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "src/ui/assets/**/*",
+      "package.json"
+    ]
   }
 }

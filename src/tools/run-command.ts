@@ -77,7 +77,7 @@ export const runCommandTool: Tool = {
 
         // Standard blocking execution for short-lived commands
         try {
-            let { stdout, stderr } = await execAsync(command, { cwd, timeout: 30000 });
+            let { stdout, stderr } = await execAsync(command, { cwd, timeout: 30000, signal: context.signal });
 
             if (stdout.length > 15000) stdout = stdout.substring(0, 15000) + '\n...[STDOUT TRUNCATED]...';
             if (stderr.length > 5000) stderr = stderr.substring(0, 5000) + '\n...[STDERR TRUNCATED]...';

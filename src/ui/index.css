@@ -1,0 +1,92 @@
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;800&family=Inter:wght@300;400;500&display=swap');
+
+:root {
+  /* Divine Dark Mode Palette */
+  --bg-dark: #070b19;
+  --bg-surface: rgba(255, 255, 255, 0.03);
+  --bg-surface-glow: rgba(212, 175, 55, 0.08);
+  --text-main: #f8fafc;
+  --text-muted: rgba(248, 250, 252, 0.6);
+  --text-dim: rgba(248, 250, 252, 0.3);
+  
+  /* Athena Gold Accents */
+  --accent: #d4af37; /* Metallic Gold */
+  --accent-light: #f3e5ab; /* Vanilla/Light Gold */
+  --accent-hover: #e8c353;
+  --danger: #e27d60; /* Soft terracotta/coral instead of harsh red */
+  --success: #85b09a; /* Soft sage/olive instead of neon green */
+  
+  --border-glow: 0 0 15px rgba(212, 175, 55, 0.2), inset 0 0 10px rgba(212, 175, 55, 0.1);
+  --glass-border: 1px solid rgba(212, 175, 55, 0.15);
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg-dark);
+  /* Ethereal gradient background */
+  background-image: radial-gradient(circle at 50% 0%, rgba(212, 175, 55, 0.08) 0%, transparent 50%),
+                    radial-gradient(circle at 100% 100%, rgba(255, 255, 255, 0.03) 0%, transparent 40%);
+  color: var(--text-main);
+  font-family: 'Inter', sans-serif;
+  overflow: hidden;
+  font-weight: 300;
+}
+
+h1, h2, h3, h4, h5, h6, .cinzel {
+  font-family: 'Cinzel', serif;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+#root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  position: relative;
+}
+
+/* Elegant Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(212, 175, 55, 0.2);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(212, 175, 55, 0.5);
+}
+
+::placeholder {
+  color: var(--text-muted);
+}
+
+/* Ethereal Animations */
+@keyframes etherealBreathe {
+  0% { box-shadow: 0 0 10px rgba(212, 175, 55, 0.1); }
+  50% { box-shadow: 0 0 25px rgba(212, 175, 55, 0.3); }
+  100% { box-shadow: 0 0 10px rgba(212, 175, 55, 0.1); }
+}
+
+@keyframes pulseOrb {
+  0% { transform: scale(0.95); opacity: 0.7; box-shadow: 0 0 10px var(--accent); }
+  50% { transform: scale(1.05); opacity: 1; box-shadow: 0 0 25px var(--accent); }
+  100% { transform: scale(0.95); opacity: 0.7; box-shadow: 0 0 10px var(--accent); }
+}
+
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.fade-in {
+  animation: fadeSlideIn 0.5s ease-out forwards;
+}
+
+@keyframes spinSlow {
+  100% { transform: rotate(360deg); }
+}

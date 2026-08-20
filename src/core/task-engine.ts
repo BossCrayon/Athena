@@ -66,7 +66,8 @@ export class TaskEngine {
         history: Message[],
         onToken?: (text: string) => void,
         onToolCall?: (toolName: string) => void,
-        role: string = 'admin'
+        role: string = 'admin',
+        signal?: AbortSignal
     ): Promise<string> {
         // RBAC: define tools that only admins can use (hardware/laptop control)
         const ADMIN_ONLY_TOOLS = new Set([
@@ -110,7 +111,8 @@ export class TaskEngine {
             const fastOptions: GenerationOptions = {
                 temperature: 0.7,
                 onToken,
-                routing: { priority: 'latency', intent: { fastResponse: true } }
+                routing: { priority: 'latency', intent: { fastResponse: true } },
+                signal
             };
             try {
                 const response = await this.router.generate(effectiveHistory, fastOptions, allowedSchemas);
@@ -143,13 +145,14 @@ export class TaskEngine {
         const routingOptions: GenerationOptions = {
             temperature: 0.7,
             onToken,
-            routing: { priority: 'latency', requireTools: true }
+            routing: { priority: 'latency', requireTools: true },
+            signal
         };
 
-        // Create a tool context that blocks admin-only tools for user role
         const toolContext = role === 'user'
             ? {
                 ...this.defaultToolContext,
+                signal,
                 askPermission: async (toolName: string, args: Record<string, unknown>) => {
                     if (ADMIN_ONLY_TOOLS.has(toolName)) {
                         return false; // Silently deny
@@ -157,9 +160,9 @@ export class TaskEngine {
                     return this.defaultToolContext.askPermission?.(toolName, args) ?? true;
                 }
             }
-            : this.defaultToolContext;
+            : { ...this.defaultToolContext, signal };
 
-        return await this.executeInternal(task, effectiveHistory, toolContext, routingOptions, onToolCall, allowedSchemas);
+        return await this.executeInternal(task, effectiveHistory, toolContext, routingOptions, onToolCall, allowedSchemas, signal);
     }
 
     async executeBackground(
@@ -249,7 +252,8 @@ export class TaskEngine {
         context: ToolContext,
         routingOptions: GenerationOptions,
         onToolCall?: (toolName: string) => void,
-        allowedSchemas?: ToolSchema[]
+        allowedSchemas?: ToolSchema[],
+        signal?: AbortSignal
     ): Promise<string> {
         const toolSchemas = allowedSchemas ?? this.toolRegistry.getSchemas();
         if (!task.telemetry) {

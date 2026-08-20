@@ -60,6 +60,12 @@ ATHENA is not a wrapper around an LLM. It is a complete agentic system built on 
    (src/node/)                       (mobile/)
    run_command, file I/O             image picker, location,
    capture_screenshot                battery, haptics, camera
+           │
+           ▼
+   Electron Desktop App
+   (src/electron/)
+   System tray, login UI,
+   IPC bridge, node auto-start
 ```
 
 ---
@@ -140,7 +146,9 @@ Athena/
 │   │   ├── index.ts               # CLI entry point
 │   │   └── commands.ts            # Local diagnostic commands (/status, etc.)
 │   │
-│   ├── electron/                  # Electron desktop UI
+│   ├── electron/
+│   │   ├── main.ts                # Electron main process — tray, IPC, window
+│   │   └── preload.ts             # Context bridge — exposes window.athena API
 │   └── tests/
 │       ├── external.test.ts       # v0.4.0 SSRF/provenance/cache tests
 │       └── multimodal.test.ts     # K6 multimodal tests
@@ -194,6 +202,22 @@ Authenticated WebSocket nodes extend ATHENA's toolset to remote machines:
 - **Mobile Node** (`mobile/`) — location, battery, haptics, image picker
 - Nodes authenticate via `NODE_AUTH_TOKEN` stored in `expo-secure-store`
 - Heartbeat, auto-reconnect, tool correlation by `correlationId`
+- **AbortController-based cancellation** — stop signals propagate to child process via `SIGKILL`
+
+### Electron Desktop App
+A native Windows desktop application that wraps the Desktop Node with a full GUI:
+- **System tray** integration — runs silently in background, click to show window
+- **Login UI** — one-time invite hash registration, token encrypted via Electron `safeStorage`
+- **IPC bridge** (preload + contextBridge) — renderer never touches raw credentials
+- **Auto-start** — registers node connection automatically on launch if already authenticated
+- Built with Vite + vite-plugin-electron; run `npm run dev:desktop` for hot reload dev mode
+
+### Stop Command
+Any active generation or tool execution can be cancelled mid-stream:
+- Mobile/desktop UI shows a **Stop** button while Athena is responding
+- Sends `{ type: 'stop' }` over WebSocket to the Brain
+- Brain triggers `AbortController` — halts LLM streaming and tool pipeline immediately
+- Desktop Node receives `cancel_tool` event — calls `AbortController.abort()` which propagates to `execAsync` signal, killing the OS process
 
 ### External Information Layer (v0.4.0)
 All external HTTP goes through `fetchWithSecurity()`:
@@ -264,6 +288,19 @@ npm run invite
 npm run node
 ```
 
+### Desktop App (Electron)
+
+```bash
+# Development (hot reload)
+npm run dev:desktop
+
+# Build for production (outputs to release/win-unpacked/ATHENA.exe)
+npm run build:desktop
+
+# Generate a device invite hash (run once to register a new device)
+npm run invite [admin|user]
+```
+
 ### Mobile Client
 
 ```bash
@@ -323,7 +360,8 @@ Managed in Supabase (PostgreSQL). Key tables:
 | v0.4.0 | Secure web & external capabilities | ✅ Complete |
 | v0.5.0 | Latency, Fast/Dual Routers, Context-Aware Planning | ✅ Complete |
 | v0.5.1 | Task Engine Reliability, Graceful Rejection, Schema Fixes | ✅ Complete |
-| v0.6.0 | TBD | 🔜 Pending |
+| v0.6.0 | Electron Desktop App, Stop Command, AbortSignal propagation | ✅ Complete |
+| v0.7.0 | TBD | 🔜 Pending |
 
 ---
 

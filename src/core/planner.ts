@@ -180,6 +180,9 @@ Rules:
             jsonText = cleanText.substring(firstBrace, lastBrace + 1);
         }
         
+        // Remove trailing commas which frequently cause SyntaxErrors from LLM JSON output
+        jsonText = jsonText.replace(/,\s*([\]}])/g, '$1');
+        
         let plan: TaskPlan;
         try {
             plan = JSON.parse(jsonText);

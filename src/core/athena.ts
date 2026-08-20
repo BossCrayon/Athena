@@ -31,6 +31,7 @@ export class AthenaCore {
     private readonly taskStore?: TaskStore;
     private readonly eventBus?: EventBus;
     private readonly taskEngine: TaskEngine;
+    private activeControllers: Set<AbortController>;
 
     constructor(
         router: LLMRouter,
@@ -55,6 +56,7 @@ export class AthenaCore {
         this.taskEngine = new TaskEngine(router, toolRegistry, toolOrchestrator, toolContext, planner, taskStore, eventBus);
 
         this.history = [];
+        this.activeControllers = new Set();
     }
 
     async initialize() {
@@ -71,6 +73,9 @@ export class AthenaCore {
     }
 
     async chat(userInput: string, attachments?: MessageContentPart[], onToken?: (text: string) => void, onToolCall?: (toolName: string) => void, role: string = 'admin'): Promise<string> {
+        const controller = new AbortController();
+        this.activeControllers.add(controller);
+
         const userMsg: Message = {
             role: 'user',
             content: attachments && attachments.length > 0 ? [{ type: 'text', text: userInput }, ...attachments] : userInput,
@@ -92,7 +97,13 @@ export class AthenaCore {
             await this.memoryManager.syncMessage(modelMsg);
 
             return finalResponseText;
-        } catch (error) {
+        } catch (error: any) {
+            if (error.name === 'AbortError') {
+                const abortMsg: Message = { role: 'model', content: '\n*[Task aborted by user]*' };
+                this.history.push(abortMsg);
+                await this.memoryManager.syncMessage(abortMsg);
+                return abortMsg.content as string;
+            }
             this.history.pop();
 
             console.error(
@@ -100,8 +111,17 @@ export class AthenaCore {
                 error
             );
 
-            return 'I apologize, sir. I encountered an error communicating with the model provider.';
+            return '[Error processing request: ' + error + ']';
+        } finally {
+            this.activeControllers.delete(controller);
         }
+    }
+
+    stop() {
+        for (const controller of this.activeControllers) {
+            controller.abort();
+        }
+        this.activeControllers.clear();
     }
 
     getTaskEngine(): TaskEngine {
