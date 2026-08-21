@@ -385,10 +385,10 @@ fastify.register(async function (app) {
             }
         };
 
-        eventBus.on('telemetry', onTelemetry);
+        eventBus.subscribe('telemetry', onTelemetry);
 
         connection.on('close', () => {
-            eventBus.off('telemetry', onTelemetry);
+            eventBus.unsubscribe('telemetry', onTelemetry);
         });
 
         connection.on('message', async (message: Buffer | string, isBinary?: boolean) => {
