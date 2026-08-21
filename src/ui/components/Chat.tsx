@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Send, Square, ChevronDown, ShieldAlert, Check, X } from 'lucide-react';
+import { Send, Square, ChevronDown, ShieldAlert, Check, X, Mic, MicOff, MessageSquare } from 'lucide-react';
+import { useLiveAudio } from './useLiveAudio.js';
+import AICore from './AICore.js';
 
 interface PermissionReq {
   requestId: string;
@@ -8,17 +10,19 @@ interface PermissionReq {
 }
 
 export default function Chat() {
-  const [messages, setMessages] = useState<{ role: 'user' | 'athena', content: string }[]>([]);
+  const [messages, setMessages] = useState<{ role: 'user' | 'athena', content: string, isToolBubble?: boolean }[]>([]);
   const [input, setInput] = useState('');
   const [permissions, setPermissions] = useState<PermissionReq[]>([]);
   const [connected, setConnected] = useState(false);
   const [isWaiting, setIsWaiting] = useState(false);
   const [showScrollFAB, setShowScrollFAB] = useState(false);
   const [tasksExpanded, setTasksExpanded] = useState(true);
+  const [showTextChat, setShowTextChat] = useState(false);
   
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const { isListening, toggleListening, stopPlayback } = useLiveAudio();
 
   const [tasks, setTasks] = useState<{ id: string, name: string, status: string }[]>([]);
   
@@ -44,7 +48,18 @@ export default function Chat() {
                 });
                 scrollToBottomIfNear();
             } else if (msg.type === 'tool') {
-                setMessages(prev => [...prev, { role: 'athena', content: `\n*Action invoked: ${msg.tool}*\n` }]);
+                setMessages(prev => {
+                    const lastMsg = prev[prev.length - 1];
+                    if (lastMsg && lastMsg.role === 'athena' && lastMsg.isToolBubble) {
+                        const newMessages = [...prev];
+                        newMessages[newMessages.length - 1] = {
+                            ...lastMsg,
+                            content: lastMsg.content + `, ${msg.tool}`
+                        };
+                        return newMessages;
+                    }
+                    return [...prev, { role: 'athena', content: `[System] Action invoked: ${msg.tool}`, isToolBubble: true }];
+                });
                 scrollToBottomIfNear();
             } else if (msg.type === 'task_update') {
                 setTasksExpanded(true); // Auto expand when new task comes in
@@ -118,6 +133,7 @@ export default function Chat() {
   const handleStop = (e?: React.MouseEvent) => {
     if (e) e.preventDefault();
     setIsWaiting(false);
+    stopPlayback();
     window.athena.sendChatMessage(JSON.stringify({ type: 'stop' }));
   };
 
@@ -127,135 +143,142 @@ export default function Chat() {
   };
 
   return (
-    <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', height: '100%', padding: '0 20px 20px 20px', boxSizing: 'border-box', position: 'relative' }}>
+    <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', flex: 1, padding: '0 20px 20px 20px', boxSizing: 'border-box', position: 'relative', overflow: 'hidden' }}>
       
-      {/* Scrollable Chat Area */}
+      {/* Scrollable Chat Area OR AI Core */}
       <div 
         ref={scrollContainerRef}
         onScroll={handleScroll}
-        style={{ flex: 1, overflowY: 'auto', marginBottom: '20px', paddingRight: '12px', zIndex: 1, paddingTop: '20px' }}
+        style={{ 
+          flex: 1, overflowY: 'auto', marginBottom: '20px', paddingRight: '12px', zIndex: 1, paddingTop: '20px',
+          display: 'flex', flexDirection: 'column',
+          justifyContent: showTextChat ? 'flex-start' : 'center'
+        }}
       >
-        
-        {messages.length === 0 && connected && (
-          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', opacity: 0.6 }}>
-            <div className="cinzel" style={{ color: 'var(--accent)', letterSpacing: '2px', fontSize: '14px', fontStyle: 'italic', animation: 'etherealBreathe 4s infinite' }}>Speak your mind. I am listening.</div>
+        {!showTextChat ? (
+          <div className="fade-in" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flex: 1, flexDirection: 'column', gap: '40px' }}>
+             <AICore isListening={isListening} />
           </div>
-        )}
+        ) : (
+          <>
+            {messages.length === 0 && connected && (
+              <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', opacity: 0.6 }}>
+                <div className="cinzel" style={{ color: 'var(--accent)', letterSpacing: '2px', fontSize: '14px', fontStyle: 'italic', animation: 'etherealBreathe 4s infinite' }}>Speak your mind. I am listening.</div>
+              </div>
+            )}
 
-        {messages.map((msg, i) => {
-            const isUser = msg.role === 'user';
-            return (
-              <div key={i} className="fade-in" style={{ 
-                  display: 'flex',
-                  alignItems: 'flex-start',
-                  marginBottom: '24px', 
-                  gap: '16px',
-                  flexDirection: isUser ? 'row-reverse' : 'row'
-              }}>
-                  {!isUser && (
-                    <div style={{
-                      width: '36px', height: '36px', borderRadius: '18px',
-                      background: 'radial-gradient(circle, rgba(212,175,55,0.2) 0%, rgba(255,255,255,0.05) 100%)',
-                      border: '1px solid rgba(212,175,55,0.3)',
-                      boxShadow: '0 0 10px rgba(212,175,55,0.1)',
-                      display: 'flex', justifyContent: 'center', alignItems: 'center',
-                      flexShrink: 0
-                    }}>
-                      <span className="cinzel" style={{ color: 'var(--accent)', fontSize: '16px', fontWeight: 600 }}>A</span>
-                    </div>
-                  )}
-                  {isUser && (
-                    <div style={{
-                      width: '36px', height: '36px', borderRadius: '18px',
-                      background: 'rgba(255,255,255,0.05)',
-                      border: '1px solid rgba(255,255,255,0.1)',
-                      display: 'flex', justifyContent: 'center', alignItems: 'center',
-                      flexShrink: 0,
-                    }}>
-                      <span className="cinzel" style={{ color: 'var(--text-main)', fontSize: '14px' }}>U</span>
-                    </div>
-                  )}
-                  <div style={{ 
-                      backgroundColor: isUser ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.02)',
-                      backdropFilter: 'blur(10px)',
-                      color: isUser ? 'var(--text-main)' : 'var(--text-main)',
-                      border: isUser ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(212,175,55,0.15)',
-                      borderRadius: isUser ? '16px 16px 4px 16px' : '4px 16px 16px 16px',
-                      padding: '16px 20px',
-                      maxWidth: '80%',
-                      whiteSpace: 'pre-wrap',
-                      wordBreak: 'break-word',
-                      fontSize: '14.5px',
-                      lineHeight: '1.6',
-                      boxShadow: '0 4px 15px rgba(0,0,0,0.1)',
-                      fontWeight: 300
+            {messages.map((msg, i) => {
+                const isUser = msg.role === 'user';
+                return (
+                  <div key={i} className="fade-in" style={{ 
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      marginBottom: '24px', 
+                      gap: '16px',
+                      flexDirection: isUser ? 'row-reverse' : 'row'
                   }}>
-                      {msg.content.split('\n').map((line, idx) => {
-                        if (line.startsWith('*Action invoked:')) {
-                          return <div key={idx} style={{ color: 'var(--accent)', fontSize: '12px', margin: '4px 0', fontStyle: 'italic', opacity: 0.8 }}>{line}</div>;
-                        }
-                        return <span key={idx}>{line}<br/></span>;
-                      })}
+                      {!isUser && (
+                        <div style={{
+                          width: '36px', height: '36px', borderRadius: '18px',
+                          background: 'radial-gradient(circle, rgba(212,175,55,0.2) 0%, rgba(255,255,255,0.05) 100%)',
+                          border: '1px solid rgba(212,175,55,0.3)',
+                          boxShadow: '0 0 10px rgba(212,175,55,0.1)',
+                          display: 'flex', justifyContent: 'center', alignItems: 'center',
+                          flexShrink: 0
+                        }}>
+                          <span className="cinzel" style={{ color: 'var(--accent)', fontSize: '16px', fontWeight: 600 }}>A</span>
+                        </div>
+                      )}
+                      {isUser && (
+                        <div style={{
+                          width: '36px', height: '36px', borderRadius: '18px',
+                          background: 'rgba(255,255,255,0.05)',
+                          border: '1px solid rgba(255,255,255,0.1)',
+                          display: 'flex', justifyContent: 'center', alignItems: 'center',
+                          flexShrink: 0,
+                        }}>
+                          <span className="cinzel" style={{ color: 'var(--text-main)', fontSize: '14px' }}>U</span>
+                        </div>
+                      )}
+                      <div style={{ 
+                          backgroundColor: isUser ? 'rgba(255,255,255,0.05)' : (msg.isToolBubble ? 'rgba(212,175,55,0.05)' : 'rgba(255,255,255,0.02)'),
+                          backdropFilter: 'blur(10px)',
+                          color: isUser ? 'var(--text-main)' : (msg.isToolBubble ? 'var(--accent)' : 'var(--text-main)'),
+                          border: isUser ? '1px solid rgba(255,255,255,0.1)' : (msg.isToolBubble ? '1px dashed rgba(212,175,55,0.3)' : '1px solid rgba(212,175,55,0.15)'),
+                          borderRadius: isUser ? '16px 16px 4px 16px' : '4px 16px 16px 16px',
+                          padding: msg.isToolBubble ? '10px 16px' : '16px 20px',
+                          maxWidth: '80%',
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                          fontSize: msg.isToolBubble ? '12px' : '14.5px',
+                          fontStyle: msg.isToolBubble ? 'italic' : 'normal',
+                          lineHeight: '1.6',
+                          boxShadow: '0 4px 15px rgba(0,0,0,0.1)',
+                          fontWeight: 300
+                      }}>
+                          {msg.content}
+                      </div>
                   </div>
-              </div>
-            );
-        })}
-        
-        {/* Loading Indicator & Task Accordion */}
-        {isWaiting && (
-          <div className="fade-in" style={{ display: 'flex', alignItems: 'flex-start', marginBottom: '24px', gap: '16px', flexDirection: 'row' }}>
-            <div style={{
-              width: '36px', height: '36px', borderRadius: '18px',
-              background: 'radial-gradient(circle, rgba(212,175,55,0.2) 0%, rgba(255,255,255,0.05) 100%)',
-              border: '1px solid rgba(212,175,55,0.3)',
-              boxShadow: '0 0 10px rgba(212,175,55,0.1)',
-              display: 'flex', justifyContent: 'center', alignItems: 'center',
-              flexShrink: 0
-            }}>
-              <span className="cinzel" style={{ color: 'var(--accent)', fontSize: '16px', fontWeight: 600 }}>A</span>
-            </div>
-            <div style={{ 
-              backgroundColor: 'rgba(255,255,255,0.01)', backdropFilter: 'blur(10px)', border: '1px solid rgba(212,175,55,0.15)', borderRadius: '4px 16px 16px 16px',
-              padding: '16px 20px',
-              display: 'flex', flexDirection: 'column', gap: '12px', minWidth: '200px'
-            }}>
-              <div style={{ display: 'flex', gap: '16px', alignItems: 'center', cursor: tasks.length > 0 ? 'pointer' : 'default' }} onClick={() => tasks.length > 0 && setTasksExpanded(!tasksExpanded)}>
-                <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: 'var(--accent)', animation: 'pulseOrb 1.5s infinite' }}></div>
-                <div style={{ color: 'var(--text-muted)', fontSize: '13px', fontStyle: 'italic', flex: 1 }}>Pondering...</div>
-                {tasks.length > 0 && (
-                  <ChevronDown size={14} color="var(--accent)" style={{ transform: tasksExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.3s' }} />
-                )}
-              </div>
-              
-              {tasks.length > 0 && tasksExpanded && (
-                <div className="fade-in" style={{ marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '8px', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '12px' }}>
-                  {tasks.map(t => (
-                    <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span style={{ 
-                        color: t.status === 'completed' ? 'var(--success)' : (t.status === 'failed' ? 'var(--danger)' : 'var(--accent)'), 
-                        fontSize: '12px' 
-                      }}>
-                        {t.status === 'completed' ? '✦' : (t.status === 'failed' ? '✗' : '✧')}
-                      </span>
-                      <span style={{ 
-                        color: t.status === 'completed' ? 'var(--text-dim)' : 'var(--text-muted)', 
-                        fontSize: '12px', fontStyle: 'italic'
-                      }}>
-                        {t.name}
-                      </span>
-                    </div>
-                  ))}
+                );
+            })}
+            
+            {/* Loading Indicator & Task Accordion */}
+            {isWaiting && (
+              <div className="fade-in" style={{ display: 'flex', alignItems: 'flex-start', marginBottom: '24px', gap: '16px', flexDirection: 'row' }}>
+                <div style={{
+                  width: '36px', height: '36px', borderRadius: '18px',
+                  background: 'radial-gradient(circle, rgba(212,175,55,0.2) 0%, rgba(255,255,255,0.05) 100%)',
+                  border: '1px solid rgba(212,175,55,0.3)',
+                  boxShadow: '0 0 10px rgba(212,175,55,0.1)',
+                  display: 'flex', justifyContent: 'center', alignItems: 'center',
+                  flexShrink: 0
+                }}>
+                  <span className="cinzel" style={{ color: 'var(--accent)', fontSize: '16px', fontWeight: 600 }}>A</span>
                 </div>
-              )}
-            </div>
-          </div>
-        )}
+                <div style={{ 
+                  backgroundColor: 'rgba(255,255,255,0.01)', backdropFilter: 'blur(10px)', border: '1px solid rgba(212,175,55,0.15)', borderRadius: '4px 16px 16px 16px',
+                  padding: '16px 20px',
+                  display: 'flex', flexDirection: 'column', gap: '12px', minWidth: '200px'
+                }}>
+                  <div style={{ display: 'flex', gap: '16px', alignItems: 'center', cursor: tasks.length > 0 ? 'pointer' : 'default' }} onClick={() => tasks.length > 0 && setTasksExpanded(!tasksExpanded)}>
+                    <div style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: 'var(--accent)', animation: 'pulseOrb 1.5s infinite' }}></div>
+                    <div style={{ color: 'var(--text-muted)', fontSize: '13px', fontStyle: 'italic', flex: 1 }}>Pondering...</div>
+                    {tasks.length > 0 && (
+                      <ChevronDown size={14} color="var(--accent)" style={{ transform: tasksExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.3s' }} />
+                    )}
+                  </div>
+                  
+                  {tasks.length > 0 && tasksExpanded && (
+                    <div className="fade-in" style={{ marginTop: '4px', display: 'flex', flexDirection: 'column', gap: '8px', borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: '12px' }}>
+                      {tasks.map(t => (
+                        <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ 
+                            color: t.status === 'completed' ? 'var(--success)' : (t.status === 'failed' ? 'var(--danger)' : 'var(--accent)'), 
+                            fontSize: '12px' 
+                          }}>
+                            {t.status === 'completed' ? '✦' : (t.status === 'failed' ? '✗' : '✧')}
+                          </span>
+                          <span style={{ 
+                            color: t.status === 'completed' ? 'var(--text-dim)' : 'var(--text-muted)', 
+                            fontSize: '12px', fontStyle: 'italic'
+                          }}>
+                            {t.name}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
-        <div ref={bottomRef} />
+            <div ref={bottomRef} />
+          </>
+        )}
       </div>
 
       {/* Floating Action Button for scrolling to bottom */}
-      {showScrollFAB && (
+      {showScrollFAB && showTextChat && (
         <button 
           onClick={forceScrollBottom}
           className="fade-in"
@@ -312,6 +335,45 @@ export default function Chat() {
 
       {/* Input Area */}
       <form onSubmit={sendMessage} style={{ display: 'flex', gap: '16px', zIndex: 10, position: 'relative', alignItems: 'flex-end', backgroundColor: 'rgba(255, 255, 255, 0.03)', border: '1px solid rgba(255, 255, 255, 0.1)', borderRadius: '24px', padding: '10px 14px', backdropFilter: 'blur(10px)', transition: 'all 0.3s ease' }}>
+        
+        <button 
+          type="button"
+          onClick={() => setShowTextChat(!showTextChat)}
+          title="Toggle Text Log"
+          style={{
+            width: '44px', height: '44px', borderRadius: '22px', 
+            backgroundColor: showTextChat ? 'rgba(255,255,255,0.05)' : 'transparent',
+            border: '1px solid transparent',
+            color: showTextChat ? 'var(--accent)' : 'var(--text-muted)',
+            display: 'flex', justifyContent: 'center', alignItems: 'center',
+            cursor: 'pointer', transition: 'all 0.3s ease', flexShrink: 0
+          }}
+          onMouseOver={(e) => { e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.1)'; }}
+          onMouseOut={(e) => { e.currentTarget.style.backgroundColor = showTextChat ? 'rgba(255,255,255,0.05)' : 'transparent'; }}
+        >
+          <MessageSquare size={18} />
+        </button>
+
+        <button 
+          type="button"
+          onClick={toggleListening}
+          title={isListening ? "Stop Voice Mode" : "Start Voice Mode (Gemini Live)"}
+          style={{
+            width: '44px', height: '44px', borderRadius: '22px', 
+            backgroundColor: isListening ? 'rgba(212, 175, 55, 0.2)' : 'transparent',
+            border: isListening ? '1px solid var(--accent)' : '1px solid transparent',
+            color: isListening ? 'var(--accent)' : 'var(--text-muted)',
+            display: 'flex', justifyContent: 'center', alignItems: 'center',
+            cursor: 'pointer', transition: 'all 0.3s ease', flexShrink: 0,
+            boxShadow: isListening ? '0 0 15px rgba(212, 175, 55, 0.4)' : 'none',
+            animation: isListening ? 'pulseOrb 2s infinite' : 'none'
+          }}
+          onMouseOver={(e) => { if (!isListening) e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)'; }}
+          onMouseOut={(e) => { if (!isListening) e.currentTarget.style.backgroundColor = 'transparent'; }}
+        >
+          {isListening ? <Mic size={20} /> : <MicOff size={20} />}
+        </button>
+
         <textarea 
           ref={textareaRef}
           value={input}

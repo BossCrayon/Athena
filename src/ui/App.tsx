@@ -82,7 +82,15 @@ export default function App() {
         </div>
       </div>
       
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', zIndex: 5 }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative', zIndex: 5, overflow: 'hidden' }}>
+        
+        {/* Global HUD Overlays */}
+        <div className="hud-overlay">
+          <div className="hud-grid" style={{ width: '100%', height: '100%', position: 'absolute' }}></div>
+          <div className="hud-vignette" style={{ width: '100%', height: '100%', position: 'absolute' }}></div>
+          <div className="hud-scanline" style={{ width: '100%', position: 'absolute' }}></div>
+        </div>
+
         {!isAuthenticated ? (
           <Login onLogin={() => setIsAuthenticated(true)} />
         ) : (

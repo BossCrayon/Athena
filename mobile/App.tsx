@@ -91,10 +91,10 @@ export default function App() {
 
   if (appState === 'loading') {
     return (
-      <LinearGradient colors={['#050d1a', '#0a1229', '#050d1a']} style={styles.loadingContainer}>
+      <LinearGradient colors={['#070b19', '#101626', '#070b19']} style={styles.loadingContainer}>
         <StatusBar style="light" />
         <Text style={styles.logoText}>A T H E N A</Text>
-        <ActivityIndicator color="#00e5ff" style={{ marginTop: 20 }} />
+        <ActivityIndicator color="#d4af37" style={{ marginTop: 20 }} />
       </LinearGradient>
     );
   }
@@ -476,7 +476,7 @@ function ChatScreen({
   };
 
   return (
-    <LinearGradient colors={['#050d1a', '#0a1229', '#050d1a']} style={styles.container}>
+    <LinearGradient colors={['#070b19', '#101626', '#070b19']} style={styles.container}>
       <StatusBar style="light" />
 
       {/* HEADER */}
@@ -564,7 +564,7 @@ function ChatScreen({
                     isUser ? styles.userBubble : isTool ? styles.toolBubble : styles.athenaBubble,
                     isTool && { flexDirection: 'row', alignItems: 'center', gap: 8 }
                   ]}>
-                    {isTool && <ActivityIndicator size="small" color="#7dd3fc" />}
+                    {isTool && <ActivityIndicator size="small" color="#d4af37" />}
                     <Text style={[
                       styles.bubbleText,
                       isUser ? styles.userText : isTool ? styles.toolText : styles.athenaText
@@ -587,9 +587,9 @@ function ChatScreen({
                 </View>
                 <Animated.View style={[styles.bubble, styles.athenaBubble, styles.thinkingBubble, { opacity: pulseAnim }]}>
                   <View style={styles.thinkingDots}>
-                    <View style={[styles.dot, { backgroundColor: '#7dd3fc' }]} />
-                    <View style={[styles.dot, { backgroundColor: '#7dd3fc', opacity: 0.6 }]} />
-                    <View style={[styles.dot, { backgroundColor: '#7dd3fc', opacity: 0.3 }]} />
+                    <View style={[styles.dot, { backgroundColor: '#d4af37' }]} />
+                    <View style={[styles.dot, { backgroundColor: '#d4af37', opacity: 0.6 }]} />
+                    <View style={[styles.dot, { backgroundColor: '#d4af37', opacity: 0.3 }]} />
                   </View>
                 </Animated.View>
               </View>
@@ -667,7 +667,8 @@ const styles = StyleSheet.create({
     alignItems: 'center', marginBottom: 36,
   },
   logoText: {
-    color: '#00e5ff',
+    color: '#d4af37',
+    fontFamily: Platform.OS === 'ios' ? 'Palatino' : 'serif',
     fontSize: 30,
     fontWeight: '800',
     letterSpacing: 8,
@@ -680,7 +681,7 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   logoDivider: {
-    width: 40, height: 1, backgroundColor: 'rgba(0,229,255,0.3)', marginTop: 20,
+    width: 40, height: 1, backgroundColor: 'rgba(212,175,55,0.3)', marginTop: 20,
   },
   registerCard: {
     backgroundColor: 'rgba(255,255,255,0.04)',
@@ -713,12 +714,12 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   primaryButton: {
-    backgroundColor: '#00e5ff',
+    backgroundColor: '#d4af37',
     borderRadius: 14,
     paddingVertical: 16,
     alignItems: 'center',
     marginTop: 28,
-    shadowColor: '#00e5ff',
+    shadowColor: '#d4af37',
     shadowOpacity: 0.25,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 },
@@ -751,7 +752,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(5,13,26,0.8)',
   },
   headerTitle: {
-    color: '#00e5ff',
+    color: '#d4af37',
+    fontFamily: Platform.OS === 'ios' ? 'Palatino' : 'serif',
     fontSize: 18,
     fontWeight: '800',
     letterSpacing: 4,
@@ -796,7 +798,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(10,18,41,0.96)',
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(0,229,255,0.2)',
+    borderColor: 'rgba(212,175,55,0.2)',
     zIndex: 100,
     overflow: 'hidden',
     shadowColor: '#000',
@@ -811,7 +813,7 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(255,255,255,0.05)',
   },
   modeMenuItemActive: {
-    backgroundColor: 'rgba(0,229,255,0.08)',
+    backgroundColor: 'rgba(212,175,55,0.08)',
   },
   modeMenuText: {
     color: '#e2e8f0',
@@ -825,7 +827,7 @@ const styles = StyleSheet.create({
     marginTop: 100, alignItems: 'center', gap: 12,
   },
   emptyStateIcon: {
-    fontSize: 28, color: 'rgba(0,229,255,0.3)',
+    fontSize: 28, color: 'rgba(212,175,55,0.3)',
   },
   emptyStateText: {
     color: 'rgba(136,146,176,0.5)',
@@ -844,14 +846,14 @@ const styles = StyleSheet.create({
   },
   avatarBadge: {
     width: 30, height: 30, borderRadius: 15,
-    backgroundColor: 'rgba(0,229,255,0.12)',
+    backgroundColor: 'rgba(212,175,55,0.12)',
     borderWidth: 1,
-    borderColor: 'rgba(0,229,255,0.3)',
+    borderColor: 'rgba(212,175,55,0.3)',
     justifyContent: 'center', alignItems: 'center',
     marginBottom: 2,
   },
   avatarText: {
-    color: '#00e5ff', fontSize: 12, fontWeight: '800',
+    color: '#d4af37', fontSize: 12, fontWeight: '800',
   },
   bubble: {
     maxWidth: SCREEN_WIDTH * 0.75,
@@ -866,10 +868,10 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.08)',
   },
   userBubble: {
-    backgroundColor: 'rgba(0,229,255,0.12)',
+    backgroundColor: 'rgba(212,175,55,0.12)',
     borderTopRightRadius: 4,
     borderWidth: 1,
-    borderColor: 'rgba(0,229,255,0.2)',
+    borderColor: 'rgba(212,175,55,0.2)',
   },
   toolBubble: {
     backgroundColor: 'rgba(255,255,255,0.03)',
@@ -886,11 +888,11 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   athenaText: { color: '#e2e8f0' },
-  userText: { color: '#a5f3fc' },
+  userText: { color: '#f3e5ab' },
   toolText: { color: 'rgba(136,146,176,0.7)', fontSize: 13, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
   cursor: {
     width: 2, height: 16,
-    backgroundColor: '#00e5ff',
+    backgroundColor: '#d4af37',
     marginLeft: 3,
     marginTop: 3,
     borderRadius: 1,
@@ -935,16 +937,16 @@ const styles = StyleSheet.create({
   },
   sendBtn: {
     width: 38, height: 38,
-    backgroundColor: '#00e5ff',
+    backgroundColor: '#d4af37',
     borderRadius: 19,
     justifyContent: 'center', alignItems: 'center',
-    shadowColor: '#00e5ff',
+    shadowColor: '#d4af37',
     shadowOpacity: 0.3,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 2 },
   },
   sendBtnDisabled: {
-    backgroundColor: 'rgba(0,229,255,0.15)',
+    backgroundColor: 'rgba(212,175,55,0.15)',
     shadowOpacity: 0,
   },
   sendBtnIcon: {
@@ -965,7 +967,7 @@ const styles = StyleSheet.create({
   },
   previewImg: {
     width: 80, height: 80, borderRadius: 12,
-    borderWidth: 1, borderColor: 'rgba(0,229,255,0.3)',
+    borderWidth: 1, borderColor: 'rgba(212,175,55,0.3)',
   },
   removePreview: {
     position: 'absolute', top: -8, right: -8,

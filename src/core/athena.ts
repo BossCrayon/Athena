@@ -18,6 +18,7 @@ import { Planner } from './planner.js';
 import type { ContextBuilder } from './context-builder.js';
 import type { TaskStore } from './task-store.js';
 import type { EventBus } from './events.js';
+import { LiveSessionManager, type LiveSessionCallbacks } from './live.js';
 
 export class AthenaCore {
     private readonly router: LLMRouter;
@@ -32,6 +33,7 @@ export class AthenaCore {
     private readonly eventBus?: EventBus;
     private readonly taskEngine: TaskEngine;
     private activeControllers: Set<AbortController>;
+    private liveSession: LiveSessionManager | null = null;
 
     constructor(
         router: LLMRouter,
@@ -147,5 +149,20 @@ export class AthenaCore {
 
     getHistoryLength(): number {
         return this.history.length;
+    }
+
+    startLiveSession(callbacks: LiveSessionCallbacks): LiveSessionManager {
+        if (this.liveSession) {
+            this.liveSession.disconnect();
+        }
+        
+        this.liveSession = new LiveSessionManager(
+            this.toolRegistry,
+            this.toolOrchestrator,
+            this.toolContext,
+            callbacks
+        );
+        
+        return this.liveSession;
     }
 }

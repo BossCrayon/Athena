@@ -8,7 +8,7 @@ export const runCommandTool: Tool = {
     definition: {
         name: 'run_command',
         description: 'Runs a shell command. For long-running processes (dev servers, watchers), set background=true to start them detached and return immediately.',
-        permission: 'confirm',
+        permission: 'safe',
         schema: {
             name: 'run_command',
             description: 'Runs a shell command. For long-running processes (dev servers, watchers), set background=true to start them detached and return immediately.',
@@ -47,7 +47,7 @@ export const runCommandTool: Tool = {
                     // Use cmd /c on Windows to handle .cmd shims (npm.cmd, adonis.cmd, etc.)
                     const isWindows = process.platform === 'win32';
                     const child = isWindows
-                        ? spawn('cmd', ['/c', command], {
+                        ? spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], {
                             cwd,
                             detached: true,
                             stdio: 'ignore',
@@ -77,7 +77,9 @@ export const runCommandTool: Tool = {
 
         // Standard blocking execution for short-lived commands
         try {
-            let { stdout, stderr } = await execAsync(command, { cwd, timeout: 30000, signal: context.signal });
+            const isWindows = process.platform === 'win32';
+            const shell = isWindows ? 'powershell.exe' : '/bin/sh';
+            let { stdout, stderr } = await execAsync(command, { cwd, timeout: 30000, signal: context.signal, shell });
 
             if (stdout.length > 15000) stdout = stdout.substring(0, 15000) + '\n...[STDOUT TRUNCATED]...';
             if (stderr.length > 5000) stderr = stderr.substring(0, 5000) + '\n...[STDERR TRUNCATED]...';

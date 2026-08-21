@@ -348,9 +348,60 @@ fastify.register(async function (app) {
             supabase.from('auth_devices').update({ last_seen_at: new Date().toISOString() }).eq('token', token).then();
         }
 
-        connection.on('message', async (message: string) => {
+        let currentLiveSession: any = null;
+
+        const onTelemetry = (data: any) => {
+            if (data.eventType === 'subgoal_started' || data.eventType === 'subgoal_completed' || data.eventType === 'subgoal_failed') {
+                const statusMap: Record<string, string> = {
+                    'subgoal_started': 'active',
+                    'subgoal_completed': 'completed',
+                    'subgoal_failed': 'failed'
+                };
+                connection.send(JSON.stringify({ 
+                    type: 'task_update', 
+                    task: {
+                        id: data.stepId,
+                        name: data.metadata?.description || undefined,
+                        status: statusMap[data.eventType]
+                    }
+                }));
+            } else if (data.eventType === 'task_started') {
+                connection.send(JSON.stringify({ 
+                    type: 'task_update', 
+                    task: {
+                        id: data.taskId + '_planning',
+                        name: 'Formulating autonomous execution plan...',
+                        status: 'active'
+                    }
+                }));
+            } else if (data.eventType === 'plan_created') {
+                connection.send(JSON.stringify({ 
+                    type: 'task_update', 
+                    task: {
+                        id: data.taskId + '_planning',
+                        status: 'completed'
+                    }
+                }));
+            }
+        };
+
+        eventBus.on('telemetry', onTelemetry);
+
+        connection.on('close', () => {
+            eventBus.off('telemetry', onTelemetry);
+        });
+
+        connection.on('message', async (message: Buffer | string, isBinary?: boolean) => {
+            if (isBinary || Buffer.isBuffer(message) && message[0] !== 123 /* '{' */) {
+                // If it's a raw audio chunk, send it to the live session
+                if (currentLiveSession) {
+                    currentLiveSession.sendAudioChunk(message as Buffer);
+                }
+                return;
+            }
+
             try {
-                const data = JSON.parse(message);
+                const data = JSON.parse(message.toString());
                 if (data.type === 'stop') {
                     athena.stop();
                     return;
@@ -378,6 +429,43 @@ fastify.register(async function (app) {
                         deviceRole // Pass role to restrict tools
                     );
                     connection.send(JSON.stringify({ type: 'done' }));
+                }
+
+                if (data.type === 'live_start') {
+                    if (currentLiveSession) {
+                        currentLiveSession.disconnect();
+                    }
+                    currentLiveSession = athena.startLiveSession({
+                        onAudio: (chunk) => {
+                            connection.send(chunk);
+                        },
+                        onText: (text) => {
+                            connection.send(JSON.stringify({ type: 'token', text: text + '\n' }));
+                        },
+                        onToolCall: (name) => {
+                            connection.send(JSON.stringify({ type: 'tool', tool: name }));
+                        },
+                        onInterrupted: () => {
+                            connection.send(JSON.stringify({ type: 'interrupted' }));
+                        },
+                        onConnected: () => {
+                            connection.send(JSON.stringify({ type: 'live_connected' }));
+                        },
+                        onError: (err) => {
+                            connection.send(JSON.stringify({ type: 'error', message: err.message }));
+                        },
+                        onClosed: () => {
+                            connection.send(JSON.stringify({ type: 'live_closed' }));
+                        }
+                    });
+                    await currentLiveSession.connect();
+                }
+
+                if (data.type === 'live_stop') {
+                    if (currentLiveSession) {
+                        currentLiveSession.disconnect();
+                        currentLiveSession = null;
+                    }
                 }
             } catch (err) {
                 console.error('WS Error:', err);

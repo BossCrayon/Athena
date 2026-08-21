@@ -16,8 +16,12 @@ contextBridge.exposeInMainWorld('athena', {
     // Chat Transport (Secure Proxy via Main)
     connectChat: () => ipcRenderer.invoke('chat-connect'),
     sendChatMessage: (message: string) => ipcRenderer.invoke('chat-send', message),
+    sendBinaryMessage: (data: ArrayBuffer) => ipcRenderer.invoke('chat-send-binary', data),
     onChatMessage: (callback: (data: string) => void) => {
         ipcRenderer.on('chat-message', (_event: any, data: any) => callback(data));
+    },
+    onChatAudio: (callback: (data: Uint8Array) => void) => {
+        ipcRenderer.on('chat-audio', (_event: any, data: any) => callback(data));
     },
     onChatError: (callback: (err: string) => void) => {
         ipcRenderer.on('chat-error', (_event: any, err: any) => callback(err));

@@ -18,7 +18,7 @@ export const captureScreenshotTool: Tool = {
             description: "Captures a screenshot of the user's desktop screen.",
             parameters: []
         },
-        permission: 'confirm',
+        permission: 'safe',
         isParallelizable: false,
     },
     async execute(

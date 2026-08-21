@@ -260,9 +260,13 @@ ipcMain.handle('chat-connect', () => {
   const WebSocket = require('ws');
   chatWs = new WebSocket(`${SERVER_URL}/chat?token=${token}`);
 
-  chatWs.on('message', (data: Buffer) => {
+  chatWs.on('message', (data: Buffer, isBinary: boolean) => {
     if (mainWindow) {
-      mainWindow.webContents.send('chat-message', data.toString());
+      if (isBinary || (data.length > 0 && data[0] !== 123)) {
+        mainWindow.webContents.send('chat-audio', data);
+      } else {
+        mainWindow.webContents.send('chat-message', data.toString());
+      }
     }
   });
 
@@ -278,6 +282,14 @@ ipcMain.handle('chat-connect', () => {
 ipcMain.handle('chat-send', (event: any, message: string) => {
   if (chatWs && chatWs.readyState === 1 /* OPEN */) {
     chatWs.send(message);
+    return true;
+  }
+  return false;
+});
+
+ipcMain.handle('chat-send-binary', (event: any, data: ArrayBuffer) => {
+  if (chatWs && chatWs.readyState === 1 /* OPEN */) {
+    chatWs.send(Buffer.from(data));
     return true;
   }
   return false;
